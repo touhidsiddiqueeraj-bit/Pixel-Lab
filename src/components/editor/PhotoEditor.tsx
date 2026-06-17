@@ -26,7 +26,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
-import { Layers, History, Palette, SlidersHorizontal, Menu, PanelRight, Spline, Compass, Sun } from 'lucide-react';
+import { Layers, History, Palette, SlidersHorizontal, Menu, PanelRight, Spline, Compass, Sun, Brush, Image as ImageIcon, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -35,10 +35,11 @@ type PanelTab = 'layers' | 'adjust' | 'develop' | 'color' | 'history' | 'nav';
 export function PhotoEditor() {
   const [newDocOpen, setNewDocOpen] = useState(false);
   const [vectorizeOpen, setVectorizeOpen] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(true);
   const [activeTab, setActiveTab] = useState<PanelTab>('layers');
   const [isMobile, setIsMobile] = useState(false);
   const [menuSheetOpen, setMenuSheetOpen] = useState(false);
+  const [toolbarCollapsed, setToolbarCollapsed] = useState(false);
 
   const docName = useEditorStore((s) => s.docName);
   const setDocName = useEditorStore((s) => s.setDocName);
@@ -47,7 +48,16 @@ export function PhotoEditor() {
 
   // Detect mobile viewport
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 768);
+    const check = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (mobile) {
+        setPanelOpen(false);
+        setToolbarCollapsed(false);
+      } else {
+        setPanelOpen(true);
+      }
+    };
     check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
@@ -66,41 +76,23 @@ export function PhotoEditor() {
       onValueChange={(v) => setActiveTab(v as PanelTab)}
       className="h-full flex flex-col"
     >
-      <TabsList className="editor-surface editor-border rounded-none w-full justify-start h-9 p-0 border-b">
-        <TabsTrigger
-          value="layers"
-          className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs"
-        >
+      <TabsList className="editor-surface editor-border rounded-none w-full justify-start h-9 p-0 border-b overflow-x-auto custom-scroll">
+        <TabsTrigger value="layers" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
           <Layers size={12} /> <span className="hidden sm:inline">Layers</span>
         </TabsTrigger>
-        <TabsTrigger
-          value="adjust"
-          className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs"
-        >
+        <TabsTrigger value="adjust" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
           <SlidersHorizontal size={12} /> <span className="hidden sm:inline">Adjust</span>
         </TabsTrigger>
-        <TabsTrigger
-          value="develop"
-          className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs"
-        >
+        <TabsTrigger value="develop" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
           <Sun size={12} /> <span className="hidden sm:inline">Develop</span>
         </TabsTrigger>
-        <TabsTrigger
-          value="color"
-          className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs"
-        >
+        <TabsTrigger value="color" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
           <Palette size={12} /> <span className="hidden sm:inline">Color</span>
         </TabsTrigger>
-        <TabsTrigger
-          value="nav"
-          className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs"
-        >
+        <TabsTrigger value="nav" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
           <Compass size={12} /> <span className="hidden sm:inline">Nav</span>
         </TabsTrigger>
-        <TabsTrigger
-          value="history"
-          className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs"
-        >
+        <TabsTrigger value="history" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
           <History size={12} /> <span className="hidden sm:inline">History</span>
         </TabsTrigger>
       </TabsList>
@@ -129,12 +121,12 @@ export function PhotoEditor() {
     <div className="flex flex-col h-[100dvh] w-screen editor-bg editor-text overflow-hidden">
       <HiddenColorInputs />
 
-      {/* Title bar - responsive */}
-      <div className="flex items-center px-2 sm:px-3 h-8 editor-surface border-b editor-border text-xs editor-text-muted shrink-0 no-select">
+      {/* Compact title bar */}
+      <div className="flex items-center px-2 h-8 editor-surface border-b editor-border text-xs editor-text-muted shrink-0 no-select gap-1">
         {isMobile && (
           <Sheet open={menuSheetOpen} onOpenChange={setMenuSheetOpen}>
             <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-7 w-7 mr-1 touch-target">
+              <Button variant="ghost" size="icon" className="h-7 w-7 touch-target shrink-0">
                 <Menu size={16} />
               </Button>
             </SheetTrigger>
@@ -142,27 +134,66 @@ export function PhotoEditor() {
               <SheetHeader className="p-3 border-b editor-border">
                 <SheetTitle className="editor-text">Menu</SheetTitle>
               </SheetHeader>
-              <div className="p-2">
+              <div className="p-2 overflow-y-auto custom-scroll">
                 <MenuBar onOpenNewDoc={() => { setNewDocOpen(true); setMenuSheetOpen(false); }} />
               </div>
             </SheetContent>
           </Sheet>
         )}
 
-        <span className="font-medium editor-accent">⚡ Pixel Lab</span>
-        <span className="mx-1.5 editor-text-dim hidden sm:inline">·</span>
+        <span className="font-medium editor-accent shrink-0">⚡ Pixel Lab</span>
+        <span className="editor-text-dim hidden sm:inline shrink-0">·</span>
         <input
           value={docName}
           onChange={(e) => setDocName(e.target.value)}
-          className="bg-transparent outline-none focus:editor-surface-3 px-1 rounded editor-text w-24 sm:w-auto"
+          className="bg-transparent outline-none focus:editor-surface-3 px-1 rounded editor-text w-20 sm:w-auto min-w-0"
         />
-        <span className="mx-1.5 editor-text-dim hidden md:inline">·</span>
-        <span className="editor-text-dim hidden md:inline">
+        <span className="editor-text-dim hidden lg:inline shrink-0 ml-2">
           {layers.length} layers · {Math.round(zoom * 100)}%
         </span>
 
-        <div className="ml-auto flex items-center gap-1">
-          {/* Vectorize quick button */}
+        <div className="ml-auto flex items-center gap-0.5 sm:gap-1 shrink-0">
+          {/* Quick export */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              // Quick PNG export
+              const state = useEditorStore.getState();
+              const flat = document.createElement('canvas');
+              flat.width = state.docWidth;
+              flat.height = state.docHeight;
+              const ctx = flat.getContext('2d')!;
+              for (const layer of state.layers) {
+                if (!layer.visible) continue;
+                ctx.save();
+                ctx.globalAlpha = layer.opacity;
+                ctx.globalCompositeOperation = layer.blendMode as GlobalCompositeOperation;
+                if (layer.maskCanvas && layer.maskEnabled) {
+                  const tmp = document.createElement('canvas');
+                  tmp.width = state.docWidth; tmp.height = state.docHeight;
+                  const tctx = tmp.getContext('2d')!;
+                  tctx.drawImage(layer.canvas, 0, 0);
+                  tctx.globalCompositeOperation = 'destination-in';
+                  tctx.drawImage(layer.maskCanvas, 0, 0);
+                  ctx.drawImage(tmp, 0, 0);
+                } else {
+                  ctx.drawImage(layer.canvas, 0, 0);
+                }
+                ctx.restore();
+              }
+              const link = document.createElement('a');
+              link.href = flat.toDataURL('image/png');
+              link.download = `${state.docName.replace(/\.[^/.]+$/, '')}.png`;
+              link.click();
+            }}
+            className="h-7 px-2 editor-text-muted hover:editor-surface-3 gap-1"
+            title="Quick Export PNG"
+          >
+            <Download size={14} />
+            <span className="hidden lg:inline text-xs">Export</span>
+          </Button>
+
           <Button
             variant="ghost"
             size="sm"
@@ -171,13 +202,13 @@ export function PhotoEditor() {
             title="Vectorize Image"
           >
             <Spline size={14} className="text-purple-400" />
-            <span className="hidden sm:inline text-xs">Vectorize</span>
+            <span className="hidden lg:inline text-xs">Vectorize</span>
           </Button>
 
           <PerformanceControls />
           <ThemeToggle />
 
-          {/* Toggle panels button (mobile & desktop) */}
+          {/* Toggle panels button */}
           {!isMobile && (
             <Button
               variant="ghost"
@@ -198,53 +229,157 @@ export function PhotoEditor() {
       )}
       <OptionsBar />
 
-      <div className="flex flex-1 min-h-0">
-        <Toolbar />
+      <div className="flex flex-1 min-h-0 flex-col">
+        <div className="flex flex-1 min-h-0">
+          {/* Desktop: full toolbar */}
+          {!isMobile && <Toolbar />}
 
-        <div className="flex-1 flex min-w-0">
-          {/* Canvas area */}
-          <EditorCanvas />
+          <div className="flex-1 flex min-w-0">
+            {/* Canvas area */}
+            <EditorCanvas />
 
-          {/* Desktop: right panels */}
-          {!isMobile && panelOpen && (
-            <div className="w-[340px] border-l editor-border shrink-0 flex flex-col">
-              {panels}
-            </div>
-          )}
+            {/* Desktop: right panels */}
+            {!isMobile && panelOpen && (
+              <div className="w-[320px] lg:w-[360px] border-l editor-border shrink-0 flex flex-col">
+                {panels}
+              </div>
+            )}
 
-          {/* Mobile: panels in a bottom sheet */}
-          {isMobile && (
-            <Sheet open={panelOpen} onOpenChange={setPanelOpen}>
-              <SheetContent side="right" className="editor-surface editor-text border-l editor-border w-[300px] p-0">
-                <SheetHeader className="p-3 border-b editor-border">
-                  <SheetTitle className="editor-text">Panels</SheetTitle>
-                </SheetHeader>
-                <div className="flex-1 min-h-0">
-                  {panels}
-                </div>
-              </SheetContent>
-            </Sheet>
-          )}
+            {/* Mobile: panels in a bottom sheet */}
+            {isMobile && (
+              <Sheet open={panelOpen} onOpenChange={setPanelOpen}>
+                <SheetContent side="right" className="editor-surface editor-text border-l editor-border w-[300px] p-0">
+                  <SheetHeader className="p-3 border-b editor-border">
+                    <SheetTitle className="editor-text">Panels</SheetTitle>
+                  </SheetHeader>
+                  <div className="flex-1 min-h-0">
+                    {panels}
+                  </div>
+                </SheetContent>
+              </Sheet>
+            )}
+          </div>
         </div>
+
+        {/* Mobile: toolbar at bottom (below canvas) */}
+        {isMobile && (
+          <MobileToolbar
+            collapsed={toolbarCollapsed}
+            onToggle={() => setToolbarCollapsed(!toolbarCollapsed)}
+          />
+        )}
       </div>
 
-      {/* Mobile: floating panel toggle button */}
+      {/* Mobile: floating action buttons */}
       {isMobile && (
-        <Button
-          variant="default"
-          size="icon"
-          onClick={() => setPanelOpen(true)}
-          className="fixed bottom-4 right-4 h-12 w-12 rounded-full shadow-lg editor-accent-bg z-50 touch-target"
-          title="Open Panels"
-        >
-          <PanelRight size={20} className="text-white" />
-        </Button>
+        <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+          <Button
+            variant="default"
+            size="icon"
+            onClick={() => setPanelOpen(true)}
+            className="h-12 w-12 rounded-full shadow-lg editor-accent-bg touch-target"
+            title="Open Panels"
+          >
+            <PanelRight size={20} className="text-white" />
+          </Button>
+        </div>
       )}
 
       <NewDocumentDialog open={newDocOpen} onClose={() => setNewDocOpen(false)} />
       <VectorizeDialog open={vectorizeOpen} onClose={() => setVectorizeOpen(false)} />
       <Onboarding />
       <TutorialPanel />
+    </div>
+  );
+}
+
+// Mobile toolbar: horizontal scrollable bar at bottom
+function MobileToolbar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+  const activeTool = useEditorStore((s) => s.activeTool);
+  const setTool = useEditorStore((s) => s.setTool);
+  const foreground = useEditorStore((s) => s.foregroundColor);
+  const background = useEditorStore((s) => s.backgroundColor);
+  const swapColors = useEditorStore((s) => s.swapColors);
+
+  // Most-used tools for mobile (compact set)
+  const quickTools: { type: import('@/lib/editor-types').ToolType; icon: React.ReactNode; label: string }[] = [
+    { type: 'move', icon: <span className="text-base">↖</span>, label: 'Move' },
+    { type: 'brush', icon: <Brush size={18} />, label: 'Brush' },
+    { type: 'eraser', icon: <span className="text-base">⌫</span>, label: 'Eraser' },
+    { type: 'bucket', icon: <span className="text-base">🪣</span>, label: 'Fill' },
+    { type: 'shape-rect', icon: <span className="text-base">▭</span>, label: 'Rect' },
+    { type: 'shape-ellipse', icon: <span className="text-base">◯</span>, label: 'Ellipse' },
+    { type: 'text', icon: <span className="text-base font-bold">T</span>, label: 'Text' },
+    { type: 'eyedropper', icon: <span className="text-base">💧</span>, label: 'Pick' },
+    { type: 'crop', icon: <span className="text-base">⬜</span>, label: 'Crop' },
+    { type: 'magic-wand', icon: <span className="text-base">✨</span>, label: 'Wand' },
+  ];
+
+  // Full tool set (when expanded)
+  const allTools = [
+    ...quickTools,
+    { type: 'lasso' as const, icon: <span className="text-base">✏️</span>, label: 'Lasso' },
+    { type: 'pen' as const, icon: <span className="text-base">🖊️</span>, label: 'Pen' },
+    { type: 'clone-stamp' as const, icon: <span className="text-base">📇</span>, label: 'Clone' },
+    { type: 'heal-brush' as const, icon: <span className="text-base">🩹</span>, label: 'Heal' },
+    { type: 'gradient' as const, icon: <span className="text-base">🎨</span>, label: 'Grad' },
+    { type: 'shape-star' as const, icon: <span className="text-base">⭐</span>, label: 'Star' },
+    { type: 'shape-arrow' as const, icon: <span className="text-base">➜</span>, label: 'Arrow' },
+    { type: 'blob-brush' as const, icon: <span className="text-base">🫧</span>, label: 'Blob' },
+    { type: 'liquify-push' as const, icon: <span className="text-base">🌀</span>, label: 'Push' },
+    { type: 'hand' as const, icon: <span className="text-base">✋</span>, label: 'Pan' },
+    { type: 'zoom' as const, icon: <span className="text-base">🔍</span>, label: 'Zoom' },
+  ];
+
+  const tools = collapsed ? quickTools : allTools;
+
+  return (
+    <div className="shrink-0 editor-surface border-t editor-border">
+      {/* Color swatches row */}
+      <div className="flex items-center justify-center gap-3 py-1.5 border-b editor-border">
+        <button
+          onClick={() => document.getElementById('fg-color-input')?.click()}
+          className="w-7 h-7 rounded-full border-2 border-white/60 shadow shrink-0"
+          style={{ backgroundColor: foreground }}
+          title="Foreground color"
+        />
+        <button
+          onClick={swapColors}
+          className="editor-text-dim hover:editor-text text-xs"
+          title="Swap colors"
+        >⇄</button>
+        <button
+          onClick={() => document.getElementById('bg-color-input')?.click()}
+          className="w-7 h-7 rounded-full border-2 border-white/60 shadow shrink-0"
+          style={{ backgroundColor: background }}
+          title="Background color"
+        />
+      </div>
+      {/* Tools row */}
+      <div className="flex items-center gap-0.5 px-1 py-1 overflow-x-auto custom-scroll">
+        {tools.map((tool) => (
+          <button
+            key={tool.type}
+            onClick={() => setTool(tool.type)}
+            className={cn(
+              'flex flex-col items-center justify-center gap-0.5 w-12 h-12 rounded-lg transition-colors shrink-0',
+              activeTool === tool.type
+                ? 'editor-accent-bg text-white'
+                : 'editor-text-muted hover:editor-surface-3',
+            )}
+          >
+            {tool.icon}
+            <span className="text-[8px] leading-none">{tool.label}</span>
+          </button>
+        ))}
+        <button
+          onClick={onToggle}
+          className="flex items-center justify-center w-10 h-12 rounded-lg editor-text-muted hover:editor-surface-3 shrink-0"
+          title={collapsed ? 'Show all tools' : 'Show fewer tools'}
+        >
+          <span className="text-xs">{collapsed ? '⋯' : '⋯'}</span>
+        </button>
+      </div>
     </div>
   );
 }

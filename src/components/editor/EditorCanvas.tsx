@@ -1673,11 +1673,15 @@ export function EditorCanvas() {
     };
   }, [zoom, setZoom, setTool, setToolOptions, toolOptions.brushSize, commitPenPath, composite]);
 
-  // Auto-fit zoom to container on mount (when container first measured)
-  const hasAutoFitRef = useRef(false);
+  // Auto-fit zoom to container
+  const lastFitW = useRef(0);
+  const lastFitH = useRef(0);
   useEffect(() => {
-    if (hasAutoFitRef.current) return;
     if (containerSize.w < 50 || containerSize.h < 50 || docWidth === 0) return;
+    // Re-fit if container dimensions changed (covers initial load, viewport resize, mobile/desktop switch)
+    if (containerSize.w === lastFitW.current && containerSize.h === lastFitH.current) return;
+    lastFitW.current = containerSize.w;
+    lastFitH.current = containerSize.h;
     // Use smaller margin on mobile to maximize canvas area
     const margin = containerSize.w < 500 ? 20 : 60;
     const fitZoom = Math.min(
@@ -1687,10 +1691,9 @@ export function EditorCanvas() {
     // On mobile, allow zooming in up to 2x to fill the screen
     const maxZoom = containerSize.w < 500 ? 2 : 1;
     const finalZoom = Math.max(0.05, Math.min(maxZoom, fitZoom));
-    if (finalZoom > 0) {
-      setZoom(finalZoom);
-      hasAutoFitRef.current = true;
-    }
+    setZoom(finalZoom);
+    // Reset pan to center
+    useEditorStore.getState().setPan(0, 0);
   }, [containerSize.w, containerSize.h, docWidth, docHeight, setZoom]);
 
   const displayWidth = docWidth * zoom;
@@ -1724,7 +1727,7 @@ export function EditorCanvas() {
     >
       {/* Canvas wrapper - positioned absolutely */}
       <div
-        className="absolute shadow-2xl"
+        className="absolute shadow-xl rounded-sm overflow-hidden"
         style={{
           left: offsetX,
           top: offsetY,
@@ -1758,10 +1761,45 @@ export function EditorCanvas() {
         />
       </div>
 
-      {/* Status overlays */}
-      <div className="absolute bottom-2 left-2 editor-surface/80 backdrop-blur px-2 py-1 rounded text-[10px] editor-text font-mono pointer-events-none">
+      {/* Status bar */}
+      <div className="absolute bottom-2 left-2 editor-surface/90 backdrop-blur px-2.5 py-1 rounded-md text-[10px] editor-text font-mono pointer-events-none shadow-md">
         {docWidth} × {docHeight}px · {Math.round(zoom * 100)}%
         {cursorPos && ` · ${Math.round(cursorPos.x)}, ${Math.round(cursorPos.y)}`}
+      </div>
+
+      {/* Zoom controls (bottom-right, non-intrusive) */}
+      <div className="absolute bottom-2 right-2 flex items-center gap-1 editor-surface/90 backdrop-blur rounded-md shadow-md p-0.5">
+        <button
+          onClick={() => setZoom(zoom / 1.25)}
+          className="w-7 h-7 flex items-center justify-center rounded editor-text-muted hover:editor-surface-3 transition-colors"
+          title="Zoom out"
+        >−</button>
+        <button
+          onClick={() => {
+            // Fit to screen
+            if (containerSize.w > 0 && containerSize.h > 0) {
+              const margin = 40;
+              const fitZoom = Math.min(
+                (containerSize.w - margin) / docWidth,
+                (containerSize.h - margin) / docHeight,
+              );
+              setZoom(Math.max(0.05, fitZoom));
+              useEditorStore.getState().setPan(0, 0);
+            }
+          }}
+          className="px-2 h-7 flex items-center justify-center rounded editor-text-muted hover:editor-surface-3 text-[10px] transition-colors"
+          title="Fit to screen"
+        >Fit</button>
+        <button
+          onClick={() => setZoom(zoom * 1.25)}
+          className="w-7 h-7 flex items-center justify-center rounded editor-text-muted hover:editor-surface-3 transition-colors"
+          title="Zoom in"
+        >+</button>
+        <button
+          onClick={() => { setZoom(1); useEditorStore.getState().setPan(0, 0); }}
+          className="px-2 h-7 flex items-center justify-center rounded editor-text-muted hover:editor-surface-3 text-[10px] transition-colors"
+          title="100%"
+        >1:1</button>
       </div>
     </div>
   );

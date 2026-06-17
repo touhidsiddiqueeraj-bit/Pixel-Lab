@@ -34,13 +34,13 @@ export function OptionsBar() {
   const preset = TOOL_PRESETS[activeTool];
 
   return (
-    <div className="flex items-center gap-3 sm:gap-4 px-2 sm:px-3 h-10 editor-surface-2 border-b editor-border editor-text text-xs overflow-x-auto custom-scroll">
-      <div className="flex items-center gap-2 shrink-0">
+    <div className="flex items-center gap-2 sm:gap-3 px-2 h-9 sm:h-10 editor-surface-2 border-b editor-border editor-text text-xs overflow-x-auto custom-scroll shrink-0">
+      <div className="flex items-center gap-1.5 shrink-0">
         <span className="editor-accent">{preset?.icon}</span>
-        <span className="font-medium hidden sm:inline">{preset?.label ?? 'Tool'}</span>
+        <span className="font-medium hidden md:inline">{preset?.label ?? 'Tool'}</span>
       </div>
 
-      <div className="w-px h-6 editor-border shrink-0" />
+      <div className="w-px h-5 editor-border shrink-0" />
 
       {/* Set Source button for Clone Stamp & Healing Brush (mobile-friendly) */}
       {(activeTool === 'clone-stamp' || activeTool === 'heal-brush') && (
@@ -351,11 +351,11 @@ export function OptionsBar() {
         </>
       )}
 
-      {/* Zoom controls */}
-      <div className="ml-auto flex items-center gap-1 sm:gap-2 shrink-0">
+      {/* Zoom controls — hidden on mobile (use canvas zoom buttons instead) */}
+      <div className="ml-auto flex items-center gap-1 shrink-0 hidden md:flex">
         <button
           onClick={() => setZoom(zoom / 1.25)}
-          className="px-2 h-7 rounded hover:editor-surface-3 editor-border editor-text touch-target"
+          className="w-6 h-6 flex items-center justify-center rounded hover:editor-surface-3 editor-text"
           title="Zoom out"
         >−</button>
         <input
@@ -364,17 +364,17 @@ export function OptionsBar() {
           min={1}
           max={3200}
           onChange={(e) => setZoom(Math.max(0.01, parseInt(e.target.value) || 100) / 100)}
-          className="w-14 h-7 editor-surface editor-border rounded text-center"
+          className="w-12 h-6 editor-surface editor-border rounded text-center text-[10px]"
         />
-        <span className="editor-text-muted hidden sm:inline">%</span>
+        <span className="editor-text-muted text-[10px]">%</span>
         <button
           onClick={() => setZoom(zoom * 1.25)}
-          className="px-2 h-7 rounded hover:editor-surface-3 editor-border editor-text touch-target"
+          className="w-6 h-6 flex items-center justify-center rounded hover:editor-surface-3 editor-text"
           title="Zoom in"
         >+</button>
         <button
           onClick={() => setZoom(1)}
-          className="px-2 h-7 rounded hover:editor-surface-3 editor-border editor-text text-xs touch-target hidden sm:block"
+          className="px-1.5 h-6 rounded hover:editor-surface-3 editor-text text-[10px]"
           title="100%"
         >1:1</button>
       </div>
