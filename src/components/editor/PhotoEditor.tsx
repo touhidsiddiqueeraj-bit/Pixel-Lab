@@ -10,6 +10,7 @@ import { HistoryPanel } from './HistoryPanel';
 import { ColorPanel } from './ColorPanel';
 import { AdjustmentsPanel } from './AdjustmentsPanel';
 import { NavigatorPanel } from './NavigatorPanel';
+import { DevelopPanel } from './DevelopPanel';
 import { NewDocumentDialog } from './NewDocumentDialog';
 import { VectorizeDialog } from './VectorizeDialog';
 import { ThemeToggle } from './ThemeToggle';
@@ -25,11 +26,11 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
-import { Layers, History, Palette, SlidersHorizontal, Menu, PanelRight, Spline, Compass } from 'lucide-react';
+import { Layers, History, Palette, SlidersHorizontal, Menu, PanelRight, Spline, Compass, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-type PanelTab = 'layers' | 'adjust' | 'color' | 'history' | 'nav';
+type PanelTab = 'layers' | 'adjust' | 'develop' | 'color' | 'history' | 'nav';
 
 export function PhotoEditor() {
   const [newDocOpen, setNewDocOpen] = useState(false);
@@ -79,6 +80,12 @@ export function PhotoEditor() {
           <SlidersHorizontal size={12} /> <span className="hidden sm:inline">Adjust</span>
         </TabsTrigger>
         <TabsTrigger
+          value="develop"
+          className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs"
+        >
+          <Sun size={12} /> <span className="hidden sm:inline">Develop</span>
+        </TabsTrigger>
+        <TabsTrigger
           value="color"
           className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs"
         >
@@ -102,6 +109,9 @@ export function PhotoEditor() {
       </TabsContent>
       <TabsContent value="adjust" className="flex-1 min-h-0 m-0">
         <AdjustmentsPanel />
+      </TabsContent>
+      <TabsContent value="develop" className="flex-1 min-h-0 m-0">
+        <DevelopPanel />
       </TabsContent>
       <TabsContent value="color" className="flex-1 min-h-0 m-0">
         <ColorPanel />

@@ -15,6 +15,7 @@ import {
   ChevronRight,
   GraduationCap,
   Image as ImageIcon,
+  Sun,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -77,7 +78,17 @@ const STEPS: TutorialStep[] = [
     },
   },
   {
-    title: 'Step 5: Select the Brush Tool',
+    title: 'Step 5: Try the Develop Panel (Lightroom)',
+    instruction: 'Pixel Lab has a full Lightroom-style Develop panel! Click the "Develop" tab on the right side. Try adjusting Highlights, Shadows, Clarity, or Dehaze — these are pro-level controls that selectively affect bright/dark areas. Click "Apply Tone" when done.',
+    icon: <Sun size={24} className="text-orange-400" />,
+    hint: 'The Develop tab is next to Adjust. It has 5 sections: Light, Color, Effects, Detail, and Split Toning.',
+    check: (state) => {
+      const lastHist = state.history[state.historyIndex];
+      return lastHist?.label === 'Light: Tone' || lastHist?.label === 'Light: Presence';
+    },
+  },
+  {
+    title: 'Step 6: Select the Brush Tool',
     instruction: 'Let\'s add some creative touches! Select the Brush tool from the left toolbar. It\'s the paintbrush icon. You can also press "B".',
     icon: <Brush size={24} className="text-sky-400" />,
     hint: 'The Brush tool is in the "Painting" section of the toolbar.',

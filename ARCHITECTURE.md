@@ -304,6 +304,26 @@ function applyBrightnessContrast(ctx, w, h, brightness, contrast) {
 
 **Optimized filters**: Brightness/Contrast, Invert, Grayscale, Sepia, Threshold, Levels, Curves.
 
+### Lightroom-Style Develop Adjustments
+
+The Develop panel (`DevelopPanel.tsx`) provides Lightroom-style photo development controls via functions in `image-processing.ts`:
+
+| Section | Functions | Description |
+|---------|-----------|-------------|
+| Light | `applyHighlightsShadows`, `applyWhitesBlacks`, `applyClarity`, `applyDehaze`, `applyTexture` | Selective tone adjustments targeting bright/dark/mid-tone pixels |
+| Color | `applyVibrance`, `applySaturation` | Vibrance boosts less-saturated colors more; Saturation is uniform |
+| Effects | `applyGrain`, `applyLensVignette` | Film grain with size control; lens vignette with midpoint/roundness/feather |
+| Detail | `applySharpening`, `applyLuminanceNR`, `applyColorNR` | Sharpening with radius/detail; luminance & color noise reduction |
+| Split Toning | `applySplitToning` | Different color tints for highlights vs shadows with balance control |
+
+Key algorithms:
+- **Highlights/Shadows**: Uses luminance-based masks — highlights only affect pixels above 50% brightness, shadows only affect pixels below 50%
+- **Clarity**: Large-radius local contrast enhancement (blurred image deviation boost)
+- **Texture**: Small-radius local contrast (fine detail enhancement)
+- **Dehaze**: Combined contrast + saturation boost with slight darkening
+- **Vibrance**: Saturation boost weighted by inverse of current saturation (less-saturated colors get more boost)
+- **Split Toning**: Hue/saturation tinting with luminance-based masks for highlights and shadows
+
 ### Vectorization Pipeline
 
 The vectorization process (`vectorize.ts`):
@@ -428,7 +448,7 @@ Uses `next-themes` with `defaultTheme="system"` to auto-detect OS preference. Us
 |------|---------------|
 | `editor-types.ts` | TypeScript type definitions |
 | `editor-store.ts` | Zustand store with all state and actions |
-| `image-processing.ts` | Filter algorithms, transforms, background removal |
+| `image-processing.ts` | Filter algorithms, transforms, background removal, Lightroom develop adjustments |
 | `vectorize.ts` | Raster-to-SVG vectorization pipeline |
 | `perf.ts` | Performance utilities, device detection, settings |
 
@@ -443,6 +463,7 @@ Uses `next-themes` with `defaultTheme="system"` to auto-detect OS preference. Us
 | `MenuBar.tsx` | Top menu (File, Edit, Image, Layer, Filter, Vector, View) |
 | `LayersPanel.tsx` | Layer list, masks, blend modes |
 | `AdjustmentsPanel.tsx` | Filters and adjustments UI |
+| `DevelopPanel.tsx` | Lightroom-style develop panel (Light, Color, Effects, Detail, Split Toning) |
 | `ColorPanel.tsx` | Color picker, swatches |
 | `HistoryPanel.tsx` | Undo/redo history |
 | `NavigatorPanel.tsx` | Minimap, brush presets |

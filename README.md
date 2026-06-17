@@ -68,6 +68,14 @@
 - **Edge**: Edge Detect (Sobel), Emboss
 - **AI**: Auto Background Remove (edge flood-fill), Auto Unblur
 
+### 📷 Lightroom-Style Develop Panel
+A full photo development panel inspired by Adobe Lightroom, with 5 sections:
+- **Light**: Exposure, Contrast, Highlights, Shadows, Whites, Blacks, Clarity, Dehaze, Texture
+- **Color**: Vibrance (selective saturation), Saturation
+- **Effects**: Film Grain (amount + size), Lens Vignette (amount, midpoint, roundness, feather)
+- **Detail**: Sharpening (amount, radius, detail), Luminance Noise Reduction, Color Noise Reduction
+- **Split Toning**: Highlight hue/saturation, Shadow hue/saturation, Balance
+
 ### 🔄 Vectorization
 - Convert raster images to SVG paths
 - Median cut color quantization (2-32 colors)
@@ -267,6 +275,7 @@ pixel-lab/
 │           ├── MenuBar.tsx             # Top menu bar
 │           ├── LayersPanel.tsx         # Layers management
 │           ├── AdjustmentsPanel.tsx    # Filters & adjustments
+│           ├── DevelopPanel.tsx        # Lightroom-style develop panel
 │           ├── ColorPanel.tsx          # Color picker
 │           ├── HistoryPanel.tsx        # Undo/redo history
 │           ├── NavigatorPanel.tsx      # Minimap & brush presets

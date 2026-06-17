@@ -1350,3 +1350,424 @@ export function applyHDRToning(
   }
   ctx.putImageData(imageData, 0, 0);
 }
+
+// ============================================================================
+// LIGHTROOM-STYLE DEVELOP ADJUSTMENTS
+// ============================================================================
+
+// Highlights / Shadows — selective brightening/darkening of bright/dark areas
+export function applyHighlightsShadows(
+  ctx: CanvasRenderingContext2D, w: number, h: number,
+  highlights: number, // -100 to 100 (positive = darken highlights)
+  shadows: number,    // -100 to 100 (positive = brighten shadows)
+) {
+  if (highlights === 0 && shadows === 0) return;
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  const hFactor = highlights / 100;
+  const sFactor = shadows / 100;
+  for (let i = 0; i < data.length; i += 4) {
+    const lum = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255;
+    // Highlights affect bright pixels (lum > 0.5)
+    if (hFactor !== 0) {
+      const hMask = Math.max(0, (lum - 0.5) * 2); // 0 at lum=0.5, 1 at lum=1
+      const hAdjust = -hFactor * hMask * 80;
+      data[i] = Math.max(0, Math.min(255, data[i] + hAdjust));
+      data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + hAdjust));
+      data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + hAdjust));
+    }
+    // Shadows affect dark pixels (lum < 0.5)
+    if (sFactor !== 0) {
+      const sMask = Math.max(0, (0.5 - lum) * 2); // 0 at lum=0.5, 1 at lum=0
+      const sAdjust = sFactor * sMask * 80;
+      data[i] = Math.max(0, Math.min(255, data[i] + sAdjust));
+      data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + sAdjust));
+      data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + sAdjust));
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+// Whites / Blacks — adjusts the extreme ends of the tonal range
+export function applyWhitesBlacks(
+  ctx: CanvasRenderingContext2D, w: number, h: number,
+  whites: number, // -100 to 100 (positive = brighter whites)
+  blacks: number, // -100 to 100 (positive = deeper blacks)
+) {
+  if (whites === 0 && blacks === 0) return;
+  const wShift = whites * 1.5;
+  const bShift = -blacks * 1.5;
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const lum = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255;
+    // Whites affect brightest pixels
+    const wMask = Math.max(0, (lum - 0.7) / 0.3);
+    // Blacks affect darkest pixels
+    const bMask = Math.max(0, (0.3 - lum) / 0.3);
+    const adjust = wShift * wMask + bShift * bMask;
+    data[i] = Math.max(0, Math.min(255, data[i] + adjust));
+    data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + adjust));
+    data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + adjust));
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+// Clarity — mid-tone contrast enhancement
+export function applyClarity(
+  ctx: CanvasRenderingContext2D, w: number, h: number,
+  clarity: number, // -100 to 100
+) {
+  if (clarity === 0) return;
+  const amount = clarity / 100;
+  // Compute a blurred version for local contrast
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const src = imageData.data;
+  const blurred = new Uint8ClampedArray(src.length);
+  const r = 10; // large radius for mid-tone focus
+  // Simple horizontal box blur
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let rs = 0, gs = 0, bs = 0, count = 0;
+      for (let dx = -r; dx <= r; dx += 2) {
+        const px = Math.max(0, Math.min(w - 1, x + dx));
+        const i = (y * w + px) * 4;
+        rs += src[i]; gs += src[i + 1]; bs += src[i + 2]; count++;
+      }
+      const di = (y * w + x) * 4;
+      blurred[di] = rs / count; blurred[di + 1] = gs / count; blurred[di + 2] = bs / count; blurred[di + 3] = src[di + 3];
+    }
+  }
+  // Enhance deviation from local average
+  for (let i = 0; i < src.length; i += 4) {
+    for (let c = 0; c < 3; c++) {
+      const diff = src[i + c] - blurred[i + c];
+      src[i + c] = Math.max(0, Math.min(255, blurred[i + c] + diff * (1 + amount * 2)));
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+// Dehaze — removes atmospheric haze (contrast + saturation boost on low-contrast areas)
+export function applyDehaze(
+  ctx: CanvasRenderingContext2D, w: number, h: number,
+  dehaze: number, // -100 to 100
+) {
+  if (dehaze === 0) return;
+  const amount = dehaze / 100;
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    const lum = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+    // Boost contrast
+    const contrastAdjust = amount * 40;
+    const c = (contrastAdjust + 100) / 100;
+    const intercept = 128 * (1 - c);
+    let nr = r * c + intercept;
+    let ng = g * c + intercept;
+    let nb = b * c + intercept;
+    // Boost saturation
+    const avg = (nr + ng + nb) / 3;
+    nr = avg + (nr - avg) * (1 + amount * 0.5);
+    ng = avg + (ng - avg) * (1 + amount * 0.5);
+    nb = avg + (nb - avg) * (1 + amount * 0.5);
+    // Darken slightly (dehaze darkens)
+    nr *= (1 - amount * 0.1);
+    ng *= (1 - amount * 0.1);
+    nb *= (1 - amount * 0.1);
+    data[i] = Math.max(0, Math.min(255, nr));
+    data[i + 1] = Math.max(0, Math.min(255, ng));
+    data[i + 2] = Math.max(0, Math.min(255, nb));
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+// Texture — fine detail enhancement (small-radius local contrast)
+export function applyTexture(
+  ctx: CanvasRenderingContext2D, w: number, h: number,
+  texture: number, // -100 to 100
+) {
+  if (texture === 0) return;
+  const amount = texture / 100;
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const src = imageData.data;
+  const blurred = new Uint8ClampedArray(src.length);
+  const r = 2; // small radius for fine detail
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let rs = 0, gs = 0, bs = 0, count = 0;
+      for (let dx = -r; dx <= r; dx++) {
+        for (let dy = -r; dy <= r; dy++) {
+          const px = Math.max(0, Math.min(w - 1, x + dx));
+          const py = Math.max(0, Math.min(h - 1, y + dy));
+          const i = (py * w + px) * 4;
+          rs += src[i]; gs += src[i + 1]; bs += src[i + 2]; count++;
+        }
+      }
+      const di = (y * w + x) * 4;
+      blurred[di] = rs / count; blurred[di + 1] = gs / count; blurred[di + 2] = bs / count; blurred[di + 3] = src[di + 3];
+    }
+  }
+  for (let i = 0; i < src.length; i += 4) {
+    for (let c = 0; c < 3; c++) {
+      const diff = src[i + c] - blurred[i + c];
+      src[i + c] = Math.max(0, Math.min(255, blurred[i + c] + diff * (1 + amount * 1.5)));
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+// Vibrance — selective saturation boost (affects less-saturated colors more)
+export function applyVibrance(
+  ctx: CanvasRenderingContext2D, w: number, h: number,
+  vibrance: number, // -100 to 100
+) {
+  if (vibrance === 0) return;
+  const amount = vibrance / 100;
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const avg = (r + g + b) / 3;
+    const sat = (max - min) / 255; // 0 = gray, 1 = fully saturated
+    // Boost less-saturated colors more
+    const boost = amount * (1 - sat) * 1.5 + amount * 0.3;
+    data[i] = Math.max(0, Math.min(255, avg + (r - avg) * (1 + boost)));
+    data[i + 1] = Math.max(0, Math.min(255, avg + (g - avg) * (1 + boost)));
+    data[i + 2] = Math.max(0, Math.min(255, avg + (b - avg) * (1 + boost)));
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+// Saturation — uniform saturation adjustment
+export function applySaturation(
+  ctx: CanvasRenderingContext2D, w: number, h: number,
+  saturation: number, // -100 to 100
+) {
+  if (saturation === 0) return;
+  const amount = 1 + saturation / 100;
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    const avg = (r + g + b) / 3;
+    data[i] = Math.max(0, Math.min(255, avg + (r - avg) * amount));
+    data[i + 1] = Math.max(0, Math.min(255, avg + (g - avg) * amount));
+    data[i + 2] = Math.max(0, Math.min(255, avg + (b - avg) * amount));
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+// Split Toning — apply different colors to highlights and shadows
+export function applySplitToning(
+  ctx: CanvasRenderingContext2D, w: number, h: number,
+  highlightHue: number, highlightSat: number, // 0-360, 0-100
+  shadowHue: number, shadowSat: number,
+  balance: number, // -100 to 100 (positive = more highlight color)
+) {
+  if (highlightSat === 0 && shadowSat === 0) return;
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  const hColor = hslToRgb(highlightHue, highlightSat, 50);
+  const sColor = hslToRgb(shadowHue, shadowSat, 50);
+  const bal = balance / 100;
+  for (let i = 0; i < data.length; i += 4) {
+    const lum = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255;
+    // Highlight color weight (stronger for bright pixels)
+    const hWeight = Math.max(0, lum - 0.5 + bal * 0.3) * 2;
+    // Shadow color weight (stronger for dark pixels)
+    const sWeight = Math.max(0, 0.5 - lum - bal * 0.3) * 2;
+    if (highlightSat > 0) {
+      const tint = highlightSat / 100;
+      data[i] = Math.max(0, Math.min(255, data[i] * (1 - hWeight * tint * 0.3) + hColor.r * hWeight * tint * 0.3));
+      data[i + 1] = Math.max(0, Math.min(255, data[i + 1] * (1 - hWeight * tint * 0.3) + hColor.g * hWeight * tint * 0.3));
+      data[i + 2] = Math.max(0, Math.min(255, data[i + 2] * (1 - hWeight * tint * 0.3) + hColor.b * hWeight * tint * 0.3));
+    }
+    if (shadowSat > 0) {
+      const tint = shadowSat / 100;
+      data[i] = Math.max(0, Math.min(255, data[i] * (1 - sWeight * tint * 0.3) + sColor.r * sWeight * tint * 0.3));
+      data[i + 1] = Math.max(0, Math.min(255, data[i + 1] * (1 - sWeight * tint * 0.3) + sColor.g * sWeight * tint * 0.3));
+      data[i + 2] = Math.max(0, Math.min(255, data[i + 2] * (1 - sWeight * tint * 0.3) + sColor.b * sWeight * tint * 0.3));
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+// Grain — add film grain
+export function applyGrain(
+  ctx: CanvasRenderingContext2D, w: number, h: number,
+  amount: number, // 0-100
+  size: number,   // 1-100 (pixel size of grain)
+) {
+  if (amount <= 0) return;
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  const strength = amount / 100 * 50;
+  const grainSize = Math.max(1, Math.round(size / 10));
+  for (let y = 0; y < h; y += grainSize) {
+    for (let x = 0; x < w; x += grainSize) {
+      const noise = (Math.random() - 0.5) * strength;
+      for (let dy = 0; dy < grainSize && y + dy < h; dy++) {
+        for (let dx = 0; dx < grainSize && x + dx < w; dx++) {
+          const i = ((y + dy) * w + (x + dx)) * 4;
+          data[i] = Math.max(0, Math.min(255, data[i] + noise));
+          data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + noise));
+          data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + noise));
+        }
+      }
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+// Lens Vignette — darker corners (Lightroom-style)
+export function applyLensVignette(
+  ctx: CanvasRenderingContext2D, w: number, h: number,
+  amount: number, // -100 to 100 (positive = darken, negative = brighten)
+  midpoint: number, // 0-100 (how far from center the effect starts)
+  roundness: number, // 0-100 (shape: 0=elliptical, 100=circular)
+  feather: number,   // 0-100 (edge softness)
+) {
+  if (amount === 0) return;
+  const cx = w / 2;
+  const cy = h / 2;
+  const maxDist = Math.sqrt(cx * cx + cy * cy);
+  const innerR = (midpoint / 100) * maxDist;
+  const outerR = maxDist;
+  const roundFactor = roundness / 100;
+  const featherFactor = Math.max(0.01, feather / 100);
+  const darken = -amount / 100;
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      // Adjust distance for roundness (elliptical vs circular)
+      const aspectAdjust = roundFactor + (1 - roundFactor) * (w / h);
+      const dx = (x - cx);
+      const dy = (y - cy) * aspectAdjust;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= innerR) continue;
+      let t = (dist - innerR) / (outerR - innerR);
+      t = Math.min(1, t / featherFactor);
+      const factor = 1 + darken * t;
+      const i = (y * w + x) * 4;
+      data[i] = Math.max(0, Math.min(255, data[i] * factor));
+      data[i + 1] = Math.max(0, Math.min(255, data[i + 1] * factor));
+      data[i + 2] = Math.max(0, Math.min(255, data[i + 2] * factor));
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+// Sharpening — detail enhancement (Lightroom-style with radius and masking)
+export function applySharpening(
+  ctx: CanvasRenderingContext2D, w: number, h: number,
+  amount: number,  // 0-150
+  radius: number,  // 0.5-3 (pixels)
+  detail: number,  // 0-100
+) {
+  if (amount <= 0) return;
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const src = imageData.data;
+  const blurred = new Uint8ClampedArray(src.length);
+  const r = Math.max(1, Math.round(radius));
+  // Box blur
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let rs = 0, gs = 0, bs = 0, count = 0;
+      for (let dx = -r; dx <= r; dx++) {
+        const px = Math.max(0, Math.min(w - 1, x + dx));
+        const i = (y * w + px) * 4;
+        rs += src[i]; gs += src[i + 1]; bs += src[i + 2]; count++;
+      }
+      const di = (y * w + x) * 4;
+      blurred[di] = rs / count; blurred[di + 1] = gs / count; blurred[di + 2] = bs / count; blurred[di + 3] = src[di + 3];
+    }
+  }
+  const sharpAmount = amount / 100;
+  const detailBoost = 1 + detail / 200;
+  for (let i = 0; i < src.length; i += 4) {
+    for (let c = 0; c < 3; c++) {
+      const diff = (src[i + c] - blurred[i + c]) * detailBoost;
+      src[i + c] = Math.max(0, Math.min(255, src[i + c] + diff * sharpAmount));
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+// Luminance Noise Reduction — smooths luminance noise
+export function applyLuminanceNR(
+  ctx: CanvasRenderingContext2D, w: number, h: number,
+  amount: number, // 0-100
+  detail: number, // 0-100 (preserves detail)
+) {
+  if (amount <= 0) return;
+  const blurAmount = (amount / 100) * 3 * (1 - detail / 150);
+  if (blurAmount < 0.5) return;
+  applyFastBlur(ctx, w, h, blurAmount);
+}
+
+// Color Noise Reduction — reduces chroma noise
+export function applyColorNR(
+  ctx: CanvasRenderingContext2D, w: number, h: number,
+  amount: number, // 0-100
+) {
+  if (amount <= 0) return;
+  const factor = 1 - amount / 150;
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  // Simple: reduce saturation of low-saturation pixels (likely noise)
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const sat = (max - min) / 255;
+    if (sat < 0.15) { // Low saturation = likely color noise
+      const avg = (r + g + b) / 3;
+      data[i] = avg + (r - avg) * factor;
+      data[i + 1] = avg + (g - avg) * factor;
+      data[i + 2] = avg + (b - avg) * factor;
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+// HSL Adjustment — per-color hue/sat/lum shifts (Lightroom HSL panel)
+export function applyHSL(
+  ctx: CanvasRenderingContext2D, w: number, h: number,
+  // Arrays of 8 values (Red, Orange, Yellow, Green, Aqua, Blue, Purple, Magenta)
+  hueShifts: number[],   // each -180 to 180
+  satShifts: number[],   // each -100 to 100
+  lumShifts: number[],   // each -100 to 100
+) {
+  const hasChanges = hueShifts.some(v => v !== 0) || satShifts.some(v => v !== 0) || lumShifts.some(v => v !== 0);
+  if (!hasChanges) return;
+  // Color ranges (hue in degrees): Red 345-15, Orange 15-45, Yellow 45-75, Green 75-165, Aqua 165-195, Blue 195-255, Purple 255-285, Magenta 285-345
+  const ranges = [
+    [345, 15], [15, 45], [45, 75], [75, 165], [165, 195], [195, 255], [255, 285], [285, 345],
+  ];
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 10) continue;
+    const [h, s, l] = rgbToHsl(data[i], data[i + 1], data[i + 2]);
+    const hue = h; // 0-360
+    // Find which color band this pixel falls into
+    for (let band = 0; band < 8; band++) {
+      const [lo, hi] = ranges[band];
+      const inRange = lo < hi ? (hue >= lo && hue < hi) : (hue >= lo || hue < hi);
+      if (inRange) {
+        let newH = (hue + hueShifts[band] + 360) % 360;
+        let newS = Math.max(0, Math.min(100, s + satShifts[band]));
+        let newL = Math.max(0, Math.min(100, l + lumShifts[band]));
+        const rgb = hslToRgb(newH, newS, newL);
+        data[i] = rgb.r; data[i + 1] = rgb.g; data[i + 2] = rgb.b;
+        break;
+      }
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
