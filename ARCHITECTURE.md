@@ -446,29 +446,34 @@ Uses `next-themes` with `defaultTheme="system"` to auto-detect OS preference. Us
 
 | File | Responsibility |
 |------|---------------|
-| `editor-types.ts` | TypeScript type definitions |
-| `editor-store.ts` | Zustand store with all state and actions |
-| `image-processing.ts` | Filter algorithms, transforms, background removal, Lightroom develop adjustments |
+| `editor-types.ts` | TypeScript type definitions (40 tool types, 16+ tool options) |
+| `editor-store.ts` | Zustand store with all state and actions (clipboard, adjustment layers, recent files, export presets, custom shortcuts, tutorial, guides) |
+| `image-processing.ts` | Filter algorithms, Lightroom develop adjustments, LUT color grading, content-aware fill, seamless pattern maker, offset filter, align layers (~1950 lines) |
 | `vectorize.ts` | Raster-to-SVG vectorization pipeline |
-| `perf.ts` | Performance utilities, device detection, settings |
+| `vector-shapes.ts` | Illustrator-style vector shapes (star, polygon, arrow, heart, speech bubble, spiral, calligraphy stroke, scatter brush, path smoothing) |
+| `perf.ts` | Performance utilities, device detection, RAF throttle, canvas pool, memory manager |
 
 ### Components (`src/components/editor/`)
 
 | Component | Responsibility |
 |-----------|---------------|
-| `PhotoEditor.tsx` | Main container, responsive layout |
-| `EditorCanvas.tsx` | Canvas rendering, tool implementations (~1600 lines) |
-| `Toolbar.tsx` | Left tool buttons |
-| `OptionsBar.tsx` | Context-sensitive tool options |
-| `MenuBar.tsx` | Top menu (File, Edit, Image, Layer, Filter, Vector, View) |
-| `LayersPanel.tsx` | Layer list, masks, blend modes |
-| `AdjustmentsPanel.tsx` | Filters and adjustments UI |
+| `PhotoEditor.tsx` | Main container, responsive layout, drag-and-drop import, mobile bottom toolbar |
+| `EditorCanvas.tsx` | Canvas rendering, 40 tool implementations, pointer capture, auto-fit zoom (~1800 lines) |
+| `Toolbar.tsx` | Left tool buttons (desktop), 40 tools across 6 sections |
+| `OptionsBar.tsx` | Context-sensitive tool options with mobile-compact layout |
+| `MenuBar.tsx` | Top menu (File, Edit, Image, Layer, Filter, Vector, View) with 100+ menu items |
+| `LayersPanel.tsx` | Layer list, masks, blend modes, align, copy/paste |
+| `AdjustmentsPanel.tsx` | Filters and adjustments UI with Pro Color Tools |
 | `DevelopPanel.tsx` | Lightroom-style develop panel (Light, Color, Effects, Detail, Split Toning) |
 | `ColorPanel.tsx` | Color picker, swatches |
 | `HistoryPanel.tsx` | Undo/redo history |
 | `NavigatorPanel.tsx` | Minimap, brush presets |
-| `VectorizeDialog.tsx` | Vectorization dialog with preview |
-| `PerformanceControls.tsx` | FPS counter, perf settings |
+| `VectorizeDialog.tsx` | Vectorization dialog with live preview |
+| `NewDocumentDialog.tsx` | 24 document templates |
+| `Onboarding.tsx` | 7-step onboarding tour for new users |
+| `TutorialPanel.tsx` | 12-step interactive tutorial with auto-detection |
+| `ThemeToggle.tsx` | Light/dark/system toggle |
+| `PerformanceControls.tsx` | FPS counter, performance settings popover |
 
 ## Data Flow
 
@@ -526,21 +531,25 @@ Uses `next-themes` with `defaultTheme="system"` to auto-detect OS preference. Us
    export type ToolType = '...' | 'new-tool';
    ```
 
-2. Add tool preset in `tool-presets.tsx`:
+2. Add tool options if needed in `ToolOptions` interface
+
+3. Add default value in `DEFAULT_TOOL_OPTIONS` in `editor-store.ts`
+
+4. Add tool preset in `tool-presets.tsx`:
    ```typescript
    'new-tool': { icon: <Icon />, label: 'New Tool', hint: '...' },
    ```
 
-3. Add to `TOOLS` array in `Toolbar.tsx`
+5. Add to `TOOLS` array in `Toolbar.tsx` (choose the right section)
 
-4. Implement tool logic in `EditorCanvas.tsx`:
+6. Implement tool logic in `EditorCanvas.tsx`:
    - Handle `onPointerDown` for tool
    - Handle `onPointerMove` for tool
    - Handle `onPointerUp` for tool
+   - Add to `cursorStyle()` function
+   - Add keyboard shortcut to the keyboard handler
 
-5. Add options in `OptionsBar.tsx` if needed
-
-6. Add keyboard shortcut in the keyboard handler
+7. Add options in `OptionsBar.tsx` if needed
 
 ### Adding a New Filter
 
@@ -559,6 +568,119 @@ Uses `next-themes` with `defaultTheme="system"` to auto-detect OS preference. Us
 
 ## Build & Deployment
 
+### Adding a New Store Feature
+
+1. Add state and action types to the `EditorState` interface in `editor-store.ts`
+2. Add initial state value
+3. Implement the action function
+4. Subscribe to the state in components using `useEditorStore((s) => s.feature)`
+5. For persisted state, use `localStorage` (see `exportPresets` or `customShortcuts` for examples)
+
+## Pointer Capture System
+
+The editor uses `setPointerCapture()` on every pointer-down event to ensure smooth drawing:
+
+```typescript
+const onPointerDown = useCallback((e: React.PointerEvent) => {
+  // Always capture pointer so we keep getting move/up events even outside canvas
+  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  // ... tool-specific logic
+}, [...]);
+```
+
+- `onPointerLeave` is NOT used to end strokes (removed to fix mobile drawing bug)
+- `onPointerCancel` handles touch cancellation (system notifications, etc.)
+- `touch-action: none` on canvas and container prevents browser gesture interference
+- This ensures strokes continue even when the pointer leaves the canvas bounds
+
+## Mobile Layout Architecture
+
+### Responsive Detection
+```typescript
+const check = () => {
+  const mobile = window.innerWidth < 768;
+  setIsMobile(mobile);
+  if (mobile) { setPanelOpen(false); }
+  else { setPanelOpen(true); }
+};
+```
+
+### Mobile Bottom Toolbar
+On mobile, the left sidebar toolbar is replaced with a horizontal scrollable bottom bar:
+- Color swatches row (foreground, swap, background)
+- 10 quick-access tools (Move, Brush, Eraser, Fill, Rect, Ellipse, Text, Pick, Crop, Wand)
+- Expandable to 20+ tools via "⋯" button
+- Each tool shows icon + text label
+
+### Auto-Fit Zoom
+The auto-fit system re-fits when container dimensions change:
+```typescript
+// Re-fit when container size changes (viewport resize, mobile/desktop switch)
+if (containerSize.w === lastFitW.current && containerSize.h === lastFitH.current) return;
+// Mobile: 20px margin, allow 2x zoom to fill screen
+// Desktop: 60px margin, cap at 1x
+```
+
+## New Algorithms
+
+### Content-Aware Fill (No AI)
+Samples surrounding non-masked pixels and averages them with noise:
+```typescript
+for each masked pixel:
+  sample radius=20 neighborhood
+  skip other masked pixels
+  average RGB values
+  add random noise (±5)
+  fill pixel with averaged+noised value
+```
+
+### LUT Color Grading (.cube file)
+Parses standard .cube LUT files and applies them with intensity control:
+- `parseCubeLUT()` reads the text format, extracts 3D LUT entries
+- Simplifies to 256-entry per-channel LUTs (R, G, B)
+- `applyCubeLUT()` blends original and LUT-graded pixels by intensity factor
+
+### Seamless Pattern Maker
+Offsets image by half in both dimensions and reassembles 4 quadrants:
+```
+Original:     Result:
+[A][B]   →   [D][C]
+[C][D]       [B][A]
+```
+
+### Align Layers
+Finds each layer's content bounds (non-transparent pixels) and computes alignment offsets:
+- Scans each layer's alpha channel for min/max X/Y
+- Computes offset based on alignment type (left, center, right, top, middle, bottom)
+- Creates new canvas with offset content drawn at new position
+
+### Drag-and-Drop Import
+The main container has `onDragOver` and `onDrop` handlers:
+```typescript
+onDrop={(e) => {
+  const file = e.dataTransfer.files?.[0];
+  // Create new document sized to image
+  // Add layer with image content
+  // Add to recent files
+}}
+```
+
+## Tutorial System
+
+### Onboarding Tour (7 steps)
+- Shows on first visit (localStorage check)
+- Can be replayed via View → Show Onboarding Tour
+- Pure presentation (no action detection)
+
+### Interactive Tutorial (12 steps)
+- Loads a procedurally-generated landscape image
+- Monitors Zustand store for step completion
+- Auto-advances when user performs the required action (tool selection, filter application, etc.)
+- Manual "Skip Step" button for stuck users
+- Step detection checks history labels and active tool state
+
+## Build & Deployment
+
 ### Development
 ```bash
 bun run dev    # Start dev server on port 3000
@@ -571,4 +693,4 @@ bun run build  # Build for production
 bun run start  # Start production server
 ```
 
-The app is a standard Next.js application and can be deployed to Vercel, Netlify, or any Node.js host.
+The app is a standard Next.js application and can be deployed to Vercel, Netlify, or any Node.js host. All image processing is 100% client-side — no server-side processing required.

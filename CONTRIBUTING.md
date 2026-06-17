@@ -71,11 +71,12 @@ src/
 │   ├── page.tsx                # Main page (renders PhotoEditor)
 │   └── globals.css             # Global styles + theme variables
 ├── lib/                        # Core libraries (framework-agnostic)
-│   ├── editor-types.ts         # TypeScript type definitions
-│   ├── editor-store.ts         # Zustand store (state management)
-│   ├── image-processing.ts     # Filter algorithms, transforms
+│   ├── editor-types.ts         # TypeScript type definitions (40 tools, 16+ options)
+│   ├── editor-store.ts         # Zustand store (state, clipboard, adjustment layers, tutorial, etc.)
+│   ├── image-processing.ts     # Filter algorithms, Lightroom adjustments, LUT, content-aware fill (~1950 lines)
 │   ├── vectorize.ts            # Raster-to-SVG vectorization
-│   └── perf.ts                 # Performance utilities
+│   ├── vector-shapes.ts        # Illustrator-style shapes (star, polygon, arrow, heart, spiral, etc.)
+│   └── perf.ts                 # Performance utilities, device detection
 └── components/
     ├── ui/                     # shadcn/ui primitive components
     └── editor/                 # Editor-specific components
@@ -100,11 +101,14 @@ src/
 
 | File | What to know |
 |------|-------------|
-| `editor-store.ts` | Central state. All actions live here. Read this first. |
-| `editor-types.ts` | Type definitions. Update when adding tools/options. |
-| `EditorCanvas.tsx` | Largest file (~1600 lines). All tool logic lives here. |
-| `image-processing.ts` | All filter algorithms. Add new filters here. |
-| `perf.ts` | Performance utilities. Understand tier system. |
+| `editor-store.ts` | Central state. All actions live here (clipboard, adjustment layers, tutorial, recent files, shortcuts). Read this first. |
+| `editor-types.ts` | Type definitions. Update when adding tools/options. 40 tool types, 16+ tool options. |
+| `EditorCanvas.tsx` | Largest file (~1800 lines). All 40 tool implementations, pointer capture, auto-fit zoom. |
+| `image-processing.ts` | All filter algorithms (~1950 lines). Filters, Lightroom adjustments, LUT, content-aware fill, pattern maker. |
+| `vector-shapes.ts` | Illustrator-style shapes. Star, polygon, arrow, heart, speech bubble, spiral, calligraphy, scatter. |
+| `vectorize.ts` | Raster-to-SVG pipeline. Color quantization, boundary tracing, path simplification. |
+| `perf.ts` | Performance utilities. Device tier detection, RAF throttle, canvas pool, memory manager. |
+| `MenuBar.tsx` | All menu items (100+). File, Edit, Image, Layer, Filter, Vector, View menus. |
 
 ---
 
@@ -171,6 +175,21 @@ const activeTool = store.activeTool;
 - **Use integer math** where possible (`>> 8` instead of `/ 256`).
 
 - **Avoid creating canvases in hot loops** — Reuse from a pool or cache.
+
+- **Always use `setPointerCapture`** on pointer-down for drawing tools:
+  ```typescript
+  // Good — pointer capture ensures smooth strokes even outside canvas
+  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  ```
+
+- **Never use `onPointerLeave` to end strokes** — This causes premature stroke ending on mobile where the canvas is small. Use `onPointerUp` and `onPointerCancel` only.
+
+- **Add `touch-action: none`** to canvas elements to prevent browser gesture interference:
+  ```tsx
+  <canvas className="touch-none" ... />
+  ```
+
+- **Use the `vector-shapes.ts` library** for new shape tools — Don't reimplement star/polygon/heart drawing.
 
 ### Styling
 
