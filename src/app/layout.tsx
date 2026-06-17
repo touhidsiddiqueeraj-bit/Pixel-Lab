@@ -16,10 +16,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PhotoLab Studio - Photoshop Clone",
-  description: "Professional web-based image editor with vectorization, layers, filters, and AI-powered tools.",
-  keywords: ["photo editor", "photoshop clone", "image editor", "vectorize", "SVG", "Next.js"],
-  authors: [{ name: "PhotoLab Studio" }],
+  title: "Pixel Lab - Professional Image Editor",
+  description: "Pixel Lab is a web-based image editor with layers, masks, filters, vectorization, AI-powered tools, and full Photoshop-style workflow.",
+  keywords: ["pixel lab", "photo editor", "photoshop clone", "image editor", "vectorize", "SVG", "Next.js", "layers", "masks"],
+  authors: [{ name: "Pixel Lab" }],
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },

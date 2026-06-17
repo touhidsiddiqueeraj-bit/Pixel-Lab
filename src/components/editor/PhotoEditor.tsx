@@ -137,7 +137,7 @@ export function PhotoEditor() {
           </Sheet>
         )}
 
-        <span className="font-medium editor-accent">⚡ PhotoLab</span>
+        <span className="font-medium editor-accent">⚡ Pixel Lab</span>
         <span className="mx-1.5 editor-text-dim hidden sm:inline">·</span>
         <input
           value={docName}
