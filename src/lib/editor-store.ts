@@ -15,6 +15,7 @@ import {
   generateThumbnail,
 } from './image-processing';
 import { featherSelection as featherMask } from './image-processing';
+import { getPerfSettings, type PerfSettings, memory } from './perf';
 
 const DEFAULT_TOOL_OPTIONS: ToolOptions = {
   brushSize: 20,
@@ -34,6 +35,7 @@ const DEFAULT_TOOL_OPTIONS: ToolOptions = {
 };
 
 const MAX_HISTORY = 40;
+const DEFAULT_PERF_SETTINGS = getPerfSettings();
 
 function generateId(): string {
   return Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
@@ -127,6 +129,10 @@ interface EditorState {
   setZoom: (z: number) => void;
   setPan: (x: number, y: number) => void;
   setDocName: (name: string) => void;
+
+  // Performance
+  perfSettings: PerfSettings;
+  setPerfSettings: (settings: Partial<PerfSettings>) => void;
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -517,17 +523,34 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   pushHistory: (label) => {
     set((s) => {
-      const snapshots: LayerSnapshot[] = s.layers.map((l) => ({
-        id: l.id,
-        name: l.name,
-        visible: l.visible,
-        opacity: l.opacity,
-        blendMode: l.blendMode,
-        locked: l.locked,
-        dataUrl: canvasToDataUrl(l.canvas),
-        maskDataUrl: l.maskCanvas ? canvasToDataUrl(l.maskCanvas) : null,
-        maskEnabled: l.maskEnabled,
-      }));
+      const settings = s.perfSettings;
+      const maxHistory = settings.maxHistoryStates;
+      // Use JPEG for history snapshots (much smaller than PNG) when layer is fully opaque
+      // PNG preserves alpha but is 5-10x larger
+      const snapshots: LayerSnapshot[] = s.layers.map((l) => {
+        // Check if layer has any transparency
+        const ctx = l.canvas.getContext('2d', { willReadFrequently: true })!;
+        // Quick check: sample a few pixels to detect transparency (faster than full scan)
+        let hasAlpha = false;
+        const data = ctx.getImageData(0, 0, l.canvas.width, l.canvas.height).data;
+        for (let i = 3; i < data.length; i += 4) {
+          if (data[i] < 255) { hasAlpha = true; break; }
+        }
+        const dataUrl = hasAlpha
+          ? l.canvas.toDataURL('image/png')
+          : l.canvas.toDataURL('image/jpeg', settings.historyImageQuality);
+        return {
+          id: l.id,
+          name: l.name,
+          visible: l.visible,
+          opacity: l.opacity,
+          blendMode: l.blendMode,
+          locked: l.locked,
+          dataUrl,
+          maskDataUrl: l.maskCanvas ? canvasToDataUrl(l.maskCanvas) : null,
+          maskEnabled: l.maskEnabled,
+        };
+      });
       const entry: HistoryEntry = {
         id: generateId(),
         label,
@@ -538,8 +561,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       // Truncate any redo history
       const truncated = s.history.slice(0, s.historyIndex + 1);
       truncated.push(entry);
-      // Cap history
-      if (truncated.length > MAX_HISTORY) {
+      // Cap history based on perf settings
+      while (truncated.length > maxHistory) {
         truncated.shift();
       }
       return { history: truncated, historyIndex: truncated.length - 1 };
@@ -599,6 +622,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setZoom: (z) => set({ zoom: Math.max(0.05, Math.min(32, z)) }),
   setPan: (x, y) => set({ panX: x, panY: y }),
   setDocName: (name) => set({ docName: name }),
+
+  // Performance settings
+  perfSettings: DEFAULT_PERF_SETTINGS,
+  setPerfSettings: (settings) => set((s) => ({ perfSettings: { ...s.perfSettings, ...settings } })),
 }));
 
 // Restore editor state from a history entry

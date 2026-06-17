@@ -11,6 +11,7 @@ import {
   healSpot,
   liquify,
 } from '@/lib/image-processing';
+import { rafThrottle, perf, detectPerfTier, getPerfSettings, type PerfSettings } from '@/lib/perf';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -96,12 +97,13 @@ export function EditorCanvas() {
     checkerRef.current = c;
   }, []);
 
-  // Composite all visible layers onto the visible canvas
+  // Composite all visible layers onto the visible canvas - optimized to avoid resetting dimensions
   const composite = useCallback(() => {
     const canvas = compositeCanvasRef.current;
     if (!canvas) return;
-    canvas.width = docWidth;
-    canvas.height = docHeight;
+    // Only set dimensions if they changed (avoids clearing + reallocating)
+    if (canvas.width !== docWidth) canvas.width = docWidth;
+    if (canvas.height !== docHeight) canvas.height = docHeight;
     const ctx = canvas.getContext('2d')!;
     ctx.clearRect(0, 0, docWidth, docHeight);
 
@@ -209,12 +211,17 @@ export function EditorCanvas() {
     }
   }, [selectionMask, selectionBounds, activeTool, cursorPos, docWidth, docHeight, showGrid, guides]);
 
-  // Animation loop for marching ants
+  // Animation loop for marching ants - throttled to 15fps to save CPU
   useEffect(() => {
     if (!selectionMask) return;
     let raf: number;
-    const tick = () => {
-      drawOverlay();
+    let lastDraw = 0;
+    const tick = (now: number) => {
+      // Throttle to ~15fps for marching ants (still looks animated)
+      if (now - lastDraw >= 66) {
+        drawOverlay();
+        lastDraw = now;
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -300,7 +307,6 @@ export function EditorCanvas() {
     const { color, size, hardness, opacity, erase } = opts;
     const radius = Math.max(0.5, size / 2);
 
-    // Use a temporary canvas for this segment with a radial gradient based on hardness
     ctx.save();
     ctx.globalAlpha = opacity / 100;
     if (erase) {
@@ -314,26 +320,21 @@ export function EditorCanvas() {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    // If hardness is 100, just draw a solid line. Otherwise use multiple passes for soft edge.
+    // If hardness is 100, just draw a solid line - fastest path
     if (hardness >= 99 || erase) {
       ctx.beginPath();
       ctx.moveTo(from.x, from.y);
       ctx.lineTo(to.x, to.y);
       ctx.stroke();
     } else {
-      // Soft brush: draw with multiple alpha layers
-      const passes = 8;
-      const softFactor = (100 - hardness) / 100;
-      for (let i = 0; i < passes; i++) {
-        const r = radius * (1 - i * softFactor / passes * 0.9);
-        if (r < 0.5) break;
-        ctx.globalAlpha = (opacity / 100) * (1 / passes);
-        ctx.lineWidth = r * 2;
-        ctx.beginPath();
-        ctx.moveTo(from.x, from.y);
-        ctx.lineTo(to.x, to.y);
-        ctx.stroke();
-      }
+      // Soft brush: use shadow blur trick for single-pass soft edge (much faster than 8 passes)
+      // Set shadow with the brush color and offset 0 to create a soft glow around the line
+      ctx.shadowColor = color;
+      ctx.shadowBlur = radius * (1 - hardness / 100) * 2;
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.stroke();
     }
     ctx.restore();
   }, [ensureStrokeCanvas]);
@@ -659,54 +660,66 @@ export function EditorCanvas() {
     const startIdx = (startY * docWidth + startX) * 4;
     const targetR = data[startIdx], targetG = data[startIdx + 1], targetB = data[startIdx + 2];
     const threshold = (tolerance / 100) * (150 * 150 * 3);
-    const visited = new Uint8Array(docWidth * docHeight);
-    const selected = new Uint8Array(docWidth * docHeight);
-    const queue = [startY * docWidth + startX];
-    visited[startY * docWidth + startX] = 1;
-    while (queue.length > 0) {
-      const idx = queue.shift()!;
+    const W = docWidth, H = docHeight;
+    const selected = new Uint8Array(W * H);
+    // Scanline flood fill - much faster than BFS with shift()
+    const matches = (idx: number) => {
       const i = idx * 4;
       const dr = data[i] - targetR;
       const dg = data[i + 1] - targetG;
       const db = data[i + 2] - targetB;
-      const d2 = dr * dr + dg * dg + db * db;
-      if (d2 > threshold) continue;
-      selected[idx] = 1;
-      const x = idx % docWidth;
-      const y = Math.floor(idx / docWidth);
-      if (x > 0 && !visited[idx - 1]) { visited[idx - 1] = 1; queue.push(idx - 1); }
-      if (x < docWidth - 1 && !visited[idx + 1]) { visited[idx + 1] = 1; queue.push(idx + 1); }
-      if (y > 0 && !visited[idx - docWidth]) { visited[idx - docWidth] = 1; queue.push(idx - docWidth); }
-      if (y < docHeight - 1 && !visited[idx + docWidth]) { visited[idx + docWidth] = 1; queue.push(idx + docWidth); }
+      return (dr * dr + dg * dg + db * db) <= threshold;
+    };
+    const stack: number[] = [startY * W + startX];
+    let minX = W, minY = H, maxX = 0, maxY = 0;
+    while (stack.length > 0) {
+      const idx = stack.pop()!;
+      if (selected[idx]) continue;
+      if (!matches(idx)) continue;
+      const x = idx % W;
+      const y = (idx - x) / W;
+      // Find left boundary
+      let lx = x;
+      while (lx > 0 && !selected[y * W + lx - 1] && matches(y * W + lx - 1)) lx--;
+      // Find right boundary
+      let rx = x;
+      while (rx < W - 1 && !selected[y * W + rx + 1] && matches(y * W + rx + 1)) rx++;
+      // Fill the span
+      for (let fx = lx; fx <= rx; fx++) {
+        const fidx = y * W + fx;
+        selected[fidx] = 1;
+        if (fx < minX) minX = fx;
+        if (fx > maxX) maxX = fx;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        // Check row above
+        if (y > 0) {
+          const aIdx = fidx - W;
+          if (!selected[aIdx] && matches(aIdx)) stack.push(aIdx);
+        }
+        // Check row below
+        if (y < H - 1) {
+          const bIdx = fidx + W;
+          if (!selected[bIdx] && matches(bIdx)) stack.push(bIdx);
+        }
+      }
     }
     // Build mask
     const mask = createBlankCanvas(docWidth, docHeight);
     const mctx = mask.getContext('2d')!;
     const maskData = mctx.createImageData(docWidth, docHeight);
+    const md = maskData.data;
     for (let idx = 0; idx < selected.length; idx++) {
       if (selected[idx]) {
         const i = idx * 4;
-        maskData.data[i] = 255;
-        maskData.data[i + 1] = 255;
-        maskData.data[i + 2] = 255;
-        maskData.data[i + 3] = 255;
+        md[i] = 255; md[i + 1] = 255; md[i + 2] = 255; md[i + 3] = 255;
       }
     }
     mctx.putImageData(maskData, 0, 0);
-    // Bounds
-    let minX = docWidth, minY = docHeight, maxX = 0, maxY = 0;
-    for (let y = 0; y < docHeight; y++) {
-      for (let x = 0; x < docWidth; x++) {
-        if (selected[y * docWidth + x]) {
-          minX = Math.min(minX, x); minY = Math.min(minY, y);
-          maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
-        }
-      }
-    }
     setSelection(mask, { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 });
   }, [getActiveLayer, docWidth, docHeight, setSelection]);
 
-  // Paint bucket fill
+  // Paint bucket fill - optimized with scanline flood fill
   const bucketFill = useCallback((startX: number, startY: number, color: string, tolerance: number) => {
     const layer = getActiveLayer();
     if (!layer || layer.locked) return;
@@ -719,28 +732,50 @@ export function EditorCanvas() {
     const startIdx = (startY * docWidth + startX) * 4;
     const targetR = data[startIdx], targetG = data[startIdx + 1], targetB = data[startIdx + 2], targetA = data[startIdx + 3];
     const rgb = hexToRgb(color);
+    const fillR = rgb.r, fillG = rgb.g, fillB = rgb.b;
     const threshold = (tolerance / 100) * (150 * 150 * 3);
-    const visited = new Uint8Array(docWidth * docHeight);
-    const queue = [startY * docWidth + startX];
-    visited[startY * docWidth + startX] = 1;
-    let count = 0;
-    while (queue.length > 0) {
-      const idx = queue.shift()!;
+    const W = docWidth, H = docHeight;
+    const filled = new Uint8Array(W * H);
+    const matches = (idx: number) => {
       const i = idx * 4;
       const dr = data[i] - targetR;
       const dg = data[i + 1] - targetG;
       const db = data[i + 2] - targetB;
       const da = data[i + 3] - targetA;
-      const d2 = dr * dr + dg * dg + db * db + da * da;
-      if (d2 > threshold) continue;
-      data[i] = rgb.r; data[i + 1] = rgb.g; data[i + 2] = rgb.b; data[i + 3] = 255;
-      count++;
-      const x = idx % docWidth;
-      const y = Math.floor(idx / docWidth);
-      if (x > 0 && !visited[idx - 1]) { visited[idx - 1] = 1; queue.push(idx - 1); }
-      if (x < docWidth - 1 && !visited[idx + 1]) { visited[idx + 1] = 1; queue.push(idx + 1); }
-      if (y > 0 && !visited[idx - docWidth]) { visited[idx - docWidth] = 1; queue.push(idx - docWidth); }
-      if (y < docHeight - 1 && !visited[idx + docWidth]) { visited[idx + docWidth] = 1; queue.push(idx + docWidth); }
+      return (dr * dr + dg * dg + db * db + da * da) <= threshold;
+    };
+    const stack: number[] = [startY * W + startX];
+    let count = 0;
+    while (stack.length > 0) {
+      const idx = stack.pop()!;
+      if (filled[idx]) continue;
+      if (!matches(idx)) continue;
+      const x = idx % W;
+      const y = (idx - x) / W;
+      // Find left boundary
+      let lx = x;
+      while (lx > 0 && !filled[y * W + lx - 1] && matches(y * W + lx - 1)) lx--;
+      // Find right boundary
+      let rx = x;
+      while (rx < W - 1 && !filled[y * W + rx + 1] && matches(y * W + rx + 1)) rx++;
+      // Fill the span
+      for (let fx = lx; fx <= rx; fx++) {
+        const fidx = y * W + fx;
+        filled[fidx] = 1;
+        const i = fidx * 4;
+        data[i] = fillR; data[i + 1] = fillG; data[i + 2] = fillB; data[i + 3] = 255;
+        count++;
+        // Check row above
+        if (y > 0) {
+          const aIdx = fidx - W;
+          if (!filled[aIdx] && matches(aIdx)) stack.push(aIdx);
+        }
+        // Check row below
+        if (y < H - 1) {
+          const bIdx = fidx + W;
+          if (!filled[bIdx] && matches(bIdx)) stack.push(bIdx);
+        }
+      }
     }
     ctx.putImageData(imageData, 0, 0);
     refreshThumbnail(layer.id);
@@ -1103,8 +1138,12 @@ export function EditorCanvas() {
   ]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
-    const pt = toCanvasCoords(e.clientX, e.clientY);
-    setCursorPos(pt);
+    // Only update cursor position display when not actively drawing
+    // (during drawing, the cursor display is not needed and causes re-renders)
+    if (!drawingRef.current) {
+      const pt = toCanvasCoords(e.clientX, e.clientY);
+      setCursorPos(pt);
+    }
 
     if (panStartRef.current) {
       handlePan(e.clientX, e.clientY);

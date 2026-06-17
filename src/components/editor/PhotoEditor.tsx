@@ -13,6 +13,7 @@ import { NavigatorPanel } from './NavigatorPanel';
 import { NewDocumentDialog } from './NewDocumentDialog';
 import { VectorizeDialog } from './VectorizeDialog';
 import { ThemeToggle } from './ThemeToggle';
+import { PerformanceControls } from './PerformanceControls';
 import { useEditorStore } from '@/lib/editor-store';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -161,6 +162,7 @@ export function PhotoEditor() {
             <span className="hidden sm:inline text-xs">Vectorize</span>
           </Button>
 
+          <PerformanceControls />
           <ThemeToggle />
 
           {/* Toggle panels button (mobile & desktop) */}

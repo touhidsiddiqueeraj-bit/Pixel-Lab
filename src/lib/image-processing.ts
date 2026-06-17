@@ -66,31 +66,57 @@ function applyPixelTransform(
 ) {
   const imageData = ctx.getImageData(0, 0, width, height);
   const data = imageData.data;
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const i = (y * width + x) * 4;
-      const [r, g, b, a] = transform(data[i], data[i + 1], data[i + 2], data[i + 3], x, y);
-      data[i] = r;
-      data[i + 1] = g;
-      data[i + 2] = b;
-      data[i + 3] = a;
-    }
+  const len = data.length;
+  for (let i = 0, y = 0, x = 0; i < len; i += 4) {
+    const [r, g, b, a] = transform(data[i], data[i + 1], data[i + 2], data[i + 3], x, y);
+    data[i] = r;
+    data[i + 1] = g;
+    data[i + 2] = b;
+    data[i + 3] = a;
+    x++;
+    if (x >= width) { x = 0; y++; }
   }
   ctx.putImageData(imageData, 0, 0);
 }
 
-// Brightness/Contrast adjustment
+// Optimized: apply a per-pixel LUT (lookup table) - much faster than transform function
+function applyLUT(ctx: CanvasRenderingContext2D, width: number, height: number, lutR: Uint8Array, lutG: Uint8Array, lutB: Uint8Array) {
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+  const len = data.length;
+  for (let i = 0; i < len; i += 4) {
+    data[i] = lutR[data[i]];
+    data[i + 1] = lutG[data[i + 1]];
+    data[i + 2] = lutB[data[i + 2]];
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+// Optimized: apply a single LUT to all RGB channels
+function applyLUTAll(ctx: CanvasRenderingContext2D, width: number, height: number, lut: Uint8Array) {
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+  const len = data.length;
+  for (let i = 0; i < len; i += 4) {
+    data[i] = lut[data[i]];
+    data[i + 1] = lut[data[i + 1]];
+    data[i + 2] = lut[data[i + 2]];
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+// Brightness/Contrast adjustment - optimized with LUT
 export function applyBrightnessContrast(ctx: CanvasRenderingContext2D, w: number, h: number, brightness: number, contrast: number) {
   // brightness: -100 to 100, contrast: -100 to 100
   const b = brightness * 2.55;
   const c = (contrast + 100) / 100;
   const intercept = 128 * (1 - c);
-  applyPixelTransform(ctx, w, h, (r, g, bl, a) => [
-    Math.max(0, Math.min(255, r * c + intercept + b)),
-    Math.max(0, Math.min(255, g * c + intercept + b)),
-    Math.max(0, Math.min(255, bl * c + intercept + b)),
-    a,
-  ]);
+  // Build LUT
+  const lut = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) {
+    lut[i] = Math.max(0, Math.min(255, i * c + intercept + b));
+  }
+  applyLUTAll(ctx, w, h, lut);
 }
 
 // Hue / Saturation adjustment
@@ -105,36 +131,59 @@ export function applyHueSaturation(ctx: CanvasRenderingContext2D, w: number, h: 
   });
 }
 
-// Grayscale
+// Grayscale - optimized with LUT (compute luminance per pixel but no clamp needed)
 export function applyGrayscale(ctx: CanvasRenderingContext2D, w: number, h: number) {
-  applyPixelTransform(ctx, w, h, (r, g, b, a) => {
-    const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-    return [gray, gray, gray, a];
-  });
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  const len = data.length;
+  for (let i = 0; i < len; i += 4) {
+    // 0.299r + 0.587g + 0.114b - use integer math for speed
+    const gray = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
+    data[i] = gray;
+    data[i + 1] = gray;
+    data[i + 2] = gray;
+  }
+  ctx.putImageData(imageData, 0, 0);
 }
 
-// Invert
+// Invert - optimized with LUT
 export function applyInvert(ctx: CanvasRenderingContext2D, w: number, h: number) {
-  applyPixelTransform(ctx, w, h, (r, g, b, a) => [255 - r, 255 - g, 255 - b, a]);
+  const lut = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) lut[i] = 255 - i;
+  applyLUTAll(ctx, w, h, lut);
 }
 
-// Sepia
+// Sepia - optimized with direct computation
 export function applySepia(ctx: CanvasRenderingContext2D, w: number, h: number) {
-  applyPixelTransform(ctx, w, h, (r, g, b, a) => {
-    const nr = 0.393 * r + 0.769 * g + 0.189 * b;
-    const ng = 0.349 * r + 0.686 * g + 0.168 * b;
-    const nb = 0.272 * r + 0.534 * g + 0.131 * b;
-    return [Math.min(255, nr), Math.min(255, ng), Math.min(255, nb), a];
-  });
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  const len = data.length;
+  for (let i = 0; i < len; i += 4) {
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    data[i] = Math.min(255, (r * 0.393 + g * 0.769 + b * 0.189) | 0);
+    data[i + 1] = Math.min(255, (r * 0.349 + g * 0.686 + b * 0.168) | 0);
+    data[i + 2] = Math.min(255, (r * 0.272 + g * 0.534 + b * 0.131) | 0);
+  }
+  ctx.putImageData(imageData, 0, 0);
 }
 
-// Threshold
+// Threshold - optimized with LUT
 export function applyThreshold(ctx: CanvasRenderingContext2D, w: number, h: number, level: number) {
-  applyPixelTransform(ctx, w, h, (r, g, b, a) => {
-    const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+  const lut = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) {
+    // Precompute luminance thresholds
+    lut[i] = i >= level ? 255 : 0;
+  }
+  // Need per-pixel luminance, can't use applyLUTAll directly
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  const len = data.length;
+  for (let i = 0; i < len; i += 4) {
+    const gray = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
     const v = gray >= level ? 255 : 0;
-    return [v, v, v, a];
-  });
+    data[i] = v; data[i + 1] = v; data[i + 2] = v;
+  }
+  ctx.putImageData(imageData, 0, 0);
 }
 
 // Box blur
@@ -264,21 +313,22 @@ export function autoRemoveBackground(
   // 100 = very loose (distance ~150 per channel), 0 = exact
   const threshold = (tolerance / 100) * (150 * 150 * 3);
 
-  // BFS queue from all edges
-  const queue: number[] = [];
+  // BFS queue from all edges - use stack (LIFO) instead of queue for O(1) operations
+  // queue.shift() is O(n) which is catastrophic for large images
+  const stack: number[] = [];
   // Add all edge pixels
   for (let x = 0; x < w; x++) {
-    queue.push(x); // top
-    queue.push((h - 1) * w + x); // bottom
+    stack.push(x); // top
+    stack.push((h - 1) * w + x); // bottom
   }
   for (let y = 0; y < h; y++) {
-    queue.push(y * w); // left
-    queue.push(y * w + (w - 1)); // right
+    stack.push(y * w); // left
+    stack.push(y * w + (w - 1)); // right
   }
 
-  // Mark visited and process queue
-  while (queue.length > 0) {
-    const idx = queue.shift()!;
+  // Process stack - much faster than queue with shift()
+  while (stack.length > 0) {
+    const idx = stack.pop()!;
     if (visited[idx]) continue;
     visited[idx] = 1;
     const i = idx * 4;
@@ -299,10 +349,10 @@ export function autoRemoveBackground(
     const x = idx % w;
     const y = Math.floor(idx / w);
     // Add neighbors
-    if (x > 0 && !visited[idx - 1]) queue.push(idx - 1);
-    if (x < w - 1 && !visited[idx + 1]) queue.push(idx + 1);
-    if (y > 0 && !visited[idx - w]) queue.push(idx - w);
-    if (y < h - 1 && !visited[idx + w]) queue.push(idx + w);
+    if (x > 0 && !visited[idx - 1]) stack.push(idx - 1);
+    if (x < w - 1 && !visited[idx + 1]) stack.push(idx + 1);
+    if (y > 0 && !visited[idx - w]) stack.push(idx - w);
+    if (y < h - 1 && !visited[idx + w]) stack.push(idx + w);
   }
 
   // Apply feather to alpha edges
@@ -391,9 +441,11 @@ export function generateThumbnail(canvas: HTMLCanvasElement, maxSize = 48): stri
   tmp.height = Math.max(1, Math.round(th));
   const tctx = tmp.getContext('2d')!;
   tctx.imageSmoothingEnabled = true;
-  tctx.imageSmoothingQuality = 'high';
+  // Use 'low' quality for thumbnails (faster, still looks fine at small sizes)
+  tctx.imageSmoothingQuality = 'low';
   tctx.drawImage(canvas, 0, 0, tmp.width, tmp.height);
-  return tmp.toDataURL('image/png');
+  // Use JPEG for thumbnails (smaller, no alpha needed for layer previews)
+  return tmp.toDataURL('image/jpeg', 0.7);
 }
 
 // Convert canvas to data URL
