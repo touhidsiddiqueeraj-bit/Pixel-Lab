@@ -324,28 +324,24 @@ export function EditorCanvas() {
     const { color, size, hardness, opacity, erase } = opts;
     const radius = Math.max(0.5, size / 2);
 
+    // For eraser: draw with source-over (normal) on the stroke canvas using opaque color.
+    // The actual erasing happens in commitStrokeToLayer which uses destination-out.
     ctx.save();
     ctx.globalAlpha = opacity / 100;
-    if (erase) {
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.strokeStyle = 'rgba(0,0,0,1)';
-    } else {
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.strokeStyle = color;
-    }
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.strokeStyle = erase ? 'rgba(0,0,0,1)' : color;
     ctx.lineWidth = size;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    // If hardness is 100, just draw a solid line - fastest path
+    // If hardness is 100 or eraser, just draw a solid line - fastest path
     if (hardness >= 99 || erase) {
       ctx.beginPath();
       ctx.moveTo(from.x, from.y);
       ctx.lineTo(to.x, to.y);
       ctx.stroke();
     } else {
-      // Soft brush: use shadow blur trick for single-pass soft edge (much faster than 8 passes)
-      // Set shadow with the brush color and offset 0 to create a soft glow around the line
+      // Soft brush: use shadow blur trick for single-pass soft edge
       ctx.shadowColor = color;
       ctx.shadowBlur = radius * (1 - hardness / 100) * 2;
       ctx.beginPath();
@@ -361,20 +357,21 @@ export function EditorCanvas() {
     const layer = getActiveLayer();
     if (!layer || !strokeCanvasRef.current) return;
     const ctx = layer.canvas.getContext('2d')!;
-    // Get symmetric offsets for the stroke
     const strokeCanvas = strokeCanvasRef.current;
+    // Check if eraser is active — use destination-out to erase
+    const isEraser = useEditorStore.getState().activeTool === 'eraser';
     const symmetryPoints = applySymmetry({ x: 0, y: 0 });
     for (const offset of symmetryPoints) {
-      // For non-zero offsets, mirror the stroke canvas
       ctx.save();
-      // If there's a selection, clip to it
+      if (isEraser) {
+        ctx.globalCompositeOperation = 'destination-out';
+      }
       if (selectionMask) {
         const clipCanvas = createBlankCanvas(docWidth, docHeight);
         const clipCtx = clipCanvas.getContext('2d')!;
         clipCtx.drawImage(selectionMask, 0, 0);
         const tmp = createBlankCanvas(docWidth, docHeight);
         const tmpCtx = tmp.getContext('2d')!;
-        // Mirror if needed
         if (offset.x !== 0 || offset.y !== 0) {
           tmpCtx.save();
           tmpCtx.translate(offset.x === 0 ? 0 : docWidth, offset.y === 0 ? 0 : docHeight);
