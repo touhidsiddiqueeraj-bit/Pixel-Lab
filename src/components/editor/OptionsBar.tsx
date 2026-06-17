@@ -169,7 +169,8 @@ export function OptionsBar() {
       )}
 
       {/* Shape options */}
-      {(activeTool === 'shape-rect' || activeTool === 'shape-ellipse' || activeTool === 'shape-line' || activeTool === 'pen') && (
+      {(activeTool === 'shape-rect' || activeTool === 'shape-ellipse' || activeTool === 'shape-line' || activeTool === 'pen' || activeTool === 'curvature-pen' ||
+        activeTool === 'shape-star' || activeTool === 'shape-polygon' || activeTool === 'shape-arrow' || activeTool === 'shape-heart' || activeTool === 'shape-speech-bubble' || activeTool === 'shape-spiral') && (
         <>
           <div className="flex items-center gap-2 shrink-0">
             <Label className="editor-text-muted">Fill</Label>
@@ -187,8 +188,91 @@ export function OptionsBar() {
             />
             <span className="w-8">{opts.shapeStrokeWidth}px</span>
           </div>
-          {activeTool === 'pen' && (
+          {/* Star: points + inner radius */}
+          {activeTool === 'shape-star' && (
+            <>
+              <div className="flex items-center gap-2 shrink-0">
+                <Label className="editor-text-muted">Points</Label>
+                <Slider value={[opts.shapeStarPoints]} min={3} max={20} step={1} onValueChange={(v) => setOpts({ shapeStarPoints: v[0] })} className="w-16 sm:w-20" />
+                <span className="w-6">{opts.shapeStarPoints}</span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Label className="editor-text-muted">Inner</Label>
+                <Slider value={[opts.shapeStarInnerRatio * 100]} min={10} max={90} step={5} onValueChange={(v) => setOpts({ shapeStarInnerRatio: v[0] / 100 })} className="w-16 sm:w-20" />
+                <span className="w-8">{Math.round(opts.shapeStarInnerRatio * 100)}%</span>
+              </div>
+            </>
+          )}
+          {/* Polygon: sides */}
+          {activeTool === 'shape-polygon' && (
+            <div className="flex items-center gap-2 shrink-0">
+              <Label className="editor-text-muted">Sides</Label>
+              <Slider value={[opts.shapeSides]} min={3} max={12} step={1} onValueChange={(v) => setOpts({ shapeSides: v[0] })} className="w-16 sm:w-20" />
+              <span className="w-6">{opts.shapeSides}</span>
+            </div>
+          )}
+          {/* Arrow: head size */}
+          {activeTool === 'shape-arrow' && (
+            <div className="flex items-center gap-2 shrink-0">
+              <Label className="editor-text-muted">Head</Label>
+              <Slider value={[opts.shapeArrowHeadSize * 100]} min={10} max={60} step={5} onValueChange={(v) => setOpts({ shapeArrowHeadSize: v[0] / 100 })} className="w-16 sm:w-20" />
+              <span className="w-8">{Math.round(opts.shapeArrowHeadSize * 100)}%</span>
+            </div>
+          )}
+          {/* Spiral: turns */}
+          {activeTool === 'shape-spiral' && (
+            <div className="flex items-center gap-2 shrink-0">
+              <Label className="editor-text-muted">Turns</Label>
+              <Slider value={[opts.shapeSpiralTurns * 10]} min={5} max={100} step={1} onValueChange={(v) => setOpts({ shapeSpiralTurns: v[0] / 10 })} className="w-16 sm:w-20" />
+              <span className="w-8">{opts.shapeSpiralTurns.toFixed(1)}</span>
+            </div>
+          )}
+          {(activeTool === 'pen' || activeTool === 'curvature-pen') && (
             <span className="editor-text-dim text-[10px] hidden sm:inline">Enter to commit · Esc to cancel</span>
+          )}
+        </>
+      )}
+
+      {/* New brush tools options */}
+      {(activeTool === 'blob-brush' || activeTool === 'calligraphy-brush' || activeTool === 'scatter-brush' || activeTool === 'smooth-tool') && (
+        <>
+          <div className="flex items-center gap-2 shrink-0">
+            <Label className="editor-text-muted w-12 sm:w-14">Size</Label>
+            <Slider value={[opts.brushSize]} min={1} max={500} step={1} onValueChange={(v) => setOpts({ brushSize: v[0] })} className="w-20 sm:w-28" />
+            <span className="editor-text-dim">{opts.brushSize}px</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Label className="editor-text-muted w-12 sm:w-14">Opacity</Label>
+            <Slider value={[opts.brushOpacity]} min={1} max={100} step={1} onValueChange={(v) => setOpts({ brushOpacity: v[0] })} className="w-16 sm:w-24" />
+            <span className="w-8">{opts.brushOpacity}%</span>
+          </div>
+          {activeTool === 'calligraphy-brush' && (
+            <div className="flex items-center gap-2 shrink-0">
+              <Label className="editor-text-muted">Angle</Label>
+              <Slider value={[opts.calligraphyAngle]} min={0} max={360} step={5} onValueChange={(v) => setOpts({ calligraphyAngle: v[0] })} className="w-16 sm:w-24" />
+              <span className="w-10">{opts.calligraphyAngle}°</span>
+            </div>
+          )}
+          {activeTool === 'scatter-brush' && (
+            <>
+              <div className="flex items-center gap-2 shrink-0">
+                <Label className="editor-text-muted">Count</Label>
+                <Slider value={[opts.scatterCount]} min={1} max={20} step={1} onValueChange={(v) => setOpts({ scatterCount: v[0] })} className="w-16 sm:w-20" />
+                <span className="w-6">{opts.scatterCount}</span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Label className="editor-text-muted">Size</Label>
+                <Slider value={[opts.scatterSize * 100]} min={10} max={300} step={10} onValueChange={(v) => setOpts({ scatterSize: v[0] / 100 })} className="w-16 sm:w-20" />
+                <span className="w-8">{Math.round(opts.scatterSize * 100)}%</span>
+              </div>
+            </>
+          )}
+          {activeTool === 'smooth-tool' && (
+            <div className="flex items-center gap-2 shrink-0">
+              <Label className="editor-text-muted">Strength</Label>
+              <Slider value={[opts.smoothStrength]} min={0} max={100} step={5} onValueChange={(v) => setOpts({ smoothStrength: v[0] })} className="w-16 sm:w-24" />
+              <span className="w-8">{opts.smoothStrength}%</span>
+            </div>
           )}
         </>
       )}

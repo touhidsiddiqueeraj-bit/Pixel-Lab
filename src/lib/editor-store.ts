@@ -28,10 +28,20 @@ const DEFAULT_TOOL_OPTIONS: ToolOptions = {
   fontFamily: 'Inter, sans-serif',
   shapeFilled: true,
   shapeStrokeWidth: 2,
+  shapeSides: 6,
+  shapeStarPoints: 5,
+  shapeStarInnerRatio: 0.4,
+  shapeArrowHeadSize: 0.3,
+  shapeSpiralTurns: 3,
   zoomLevel: 1,
   liquifyStrength: 50,
   symmetryMode: 'none',
   symmetrySegments: 6,
+  calligraphyAngle: 45,
+  scatterCount: 5,
+  scatterSize: 1.0,
+  smoothStrength: 50,
+  blobMerge: true,
 };
 
 const MAX_HISTORY = 40;

@@ -19,9 +19,21 @@ export type ToolType =
   | 'shape-rect'
   | 'shape-ellipse'
   | 'shape-line'
+  | 'shape-star'
+  | 'shape-polygon'
+  | 'shape-arrow'
+  | 'shape-heart'
+  | 'shape-speech-bubble'
+  | 'shape-spiral'
   | 'clone-stamp'
   | 'heal-brush'
+  | 'blob-brush'
+  | 'smooth-tool'
+  | 'width-tool'
+  | 'calligraphy-brush'
+  | 'scatter-brush'
   | 'pen'
+  | 'curvature-pen'
   | 'liquify-push'
   | 'liquify-pucker'
   | 'liquify-bloat'
@@ -88,10 +100,20 @@ export interface ToolOptions {
   fontFamily: string;
   shapeFilled: boolean;
   shapeStrokeWidth: number;
+  shapeSides: number; // for polygon (3-12)
+  shapeStarPoints: number; // for star (3-20)
+  shapeStarInnerRatio: number; // 0-1, inner radius ratio
+  shapeArrowHeadSize: number; // 0-1
+  shapeSpiralTurns: number; // number of turns
   zoomLevel: number;
   liquifyStrength: number; // 0-100
   symmetryMode: 'none' | 'horizontal' | 'vertical' | 'quad' | 'mandala';
   symmetrySegments: number; // for mandala mode, 2-12
+  calligraphyAngle: number; // 0-360 degrees
+  scatterCount: number; // number of shapes per stroke
+  scatterSize: number; // 0.1-3.0 scale
+  smoothStrength: number; // 0-100
+  blobMerge: boolean; // blob brush merges overlapping strokes
 }
 
 export interface LayerSnapshot {

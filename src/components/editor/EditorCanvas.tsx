@@ -11,6 +11,19 @@ import {
   healSpot,
   liquify,
 } from '@/lib/image-processing';
+import {
+  drawStar,
+  drawPolygon,
+  drawArrow,
+  drawHeart,
+  drawSpeechBubble,
+  drawSpiral,
+  drawCalligraphyStroke,
+  drawScatterStroke,
+  smoothPath,
+  computeStarInnerR,
+  makeShapeStyle,
+} from '@/lib/vector-shapes';
 import { rafThrottle, perf, detectPerfTier, getPerfSettings, type PerfSettings } from '@/lib/perf';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -79,6 +92,8 @@ export function EditorCanvas() {
   const liquifyLastRef = useRef<Point | null>(null);
   // Brush stabilizer: smoothed position
   const stabilizerPosRef = useRef<Point | null>(null);
+  // Collected points for blob/calligraphy/scatter brushes
+  const strokePointsRef = useRef<Point[]>([]);
 
   const [cursorPos, setCursorPos] = useState<Point | null>(null);
   const [, forceRender] = useState(0);
@@ -817,17 +832,17 @@ export function EditorCanvas() {
   }, [getActiveLayer, foreground, background, selectionMask, docWidth, docHeight, refreshThumbnail, pushHistory]);
 
   // Draw shape (rectangle, ellipse, line)
-  const drawShapeOnCtx = useCallback((ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, shape: 'rect' | 'ellipse' | 'line', from: Point, to: Point) => {
-    const rgb = hexToRgb(foreground);
-    ctx.fillStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
-    ctx.strokeStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
-    ctx.lineWidth = toolOptions.shapeStrokeWidth;
+  const drawShapeOnCtx = useCallback((ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, shape: string, from: Point, to: Point) => {
+    const style = makeShapeStyle(foreground, toolOptions.shapeStrokeWidth);
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const radius = Math.min(w, h) / 2;
     if (shape === 'rect') {
       if (toolOptions.shapeFilled) ctx.fillRect(x, y, w, h);
       if (toolOptions.shapeStrokeWidth > 0) ctx.strokeRect(x, y, w, h);
     } else if (shape === 'ellipse') {
       ctx.beginPath();
-      ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx, cy, w / 2, h / 2, 0, 0, Math.PI * 2);
       if (toolOptions.shapeFilled) ctx.fill();
       if (toolOptions.shapeStrokeWidth > 0) ctx.stroke();
     } else if (shape === 'line') {
@@ -836,10 +851,26 @@ export function EditorCanvas() {
       ctx.lineTo(to.x, to.y);
       ctx.lineWidth = Math.max(1, toolOptions.shapeStrokeWidth);
       ctx.stroke();
+    } else if (shape === 'star') {
+      const points = Math.max(3, toolOptions.shapeStarPoints);
+      const outerR = Math.max(w, h) / 2;
+      const innerR = computeStarInnerR(outerR, toolOptions.shapeStarInnerRatio);
+      drawStar(ctx, cx, cy, outerR, innerR, points, style);
+    } else if (shape === 'polygon') {
+      const sides = Math.max(3, Math.min(12, toolOptions.shapeSides));
+      drawPolygon(ctx, cx, cy, radius, sides, style);
+    } else if (shape === 'arrow') {
+      drawArrow(ctx, from.x, from.y, to.x, to.y, toolOptions.shapeArrowHeadSize, style);
+    } else if (shape === 'heart') {
+      drawHeart(ctx, cx, cy, Math.max(w, h), style);
+    } else if (shape === 'speech-bubble') {
+      drawSpeechBubble(ctx, x, y, w, h, style);
+    } else if (shape === 'spiral') {
+      drawSpiral(ctx, cx, cy, radius, toolOptions.shapeSpiralTurns, style);
     }
-  }, [foreground, toolOptions.shapeFilled, toolOptions.shapeStrokeWidth]);
+  }, [foreground, toolOptions]);
 
-  const drawShape = useCallback((from: Point, to: Point, shape: 'rect' | 'ellipse' | 'line') => {
+  const drawShape = useCallback((from: Point, to: Point, shape: string) => {
     const layer = getActiveLayer();
     if (!layer || layer.locked) return;
     const ctx = layer.canvas.getContext('2d')!;
@@ -849,11 +880,9 @@ export function EditorCanvas() {
     const h = Math.abs(to.y - from.y);
     ctx.save();
     if (selectionMask) {
-      // Create clipping from mask
       const clipCanvas = createBlankCanvas(docWidth, docHeight);
       const clipCtx = clipCanvas.getContext('2d')!;
       clipCtx.drawImage(selectionMask, 0, 0);
-      // Render shape onto tmp, then clip
       const tmp = createBlankCanvas(docWidth, docHeight);
       const tmpCtx = tmp.getContext('2d')!;
       drawShapeOnCtx(tmpCtx, x, y, w, h, shape, from, to);
@@ -1003,14 +1032,16 @@ export function EditorCanvas() {
       return;
     }
 
-    if (activeTool === 'shape-rect' || activeTool === 'shape-ellipse' || activeTool === 'shape-line') {
+    if (activeTool.startsWith('shape-')) {
       drawingRef.current = true;
       startPointRef.current = pt;
       return;
     }
 
-    // Brush / pencil / eraser
-    if (activeTool === 'brush' || activeTool === 'pencil' || activeTool === 'eraser') {
+    // Brush / pencil / eraser / blob-brush / calligraphy / scatter
+    if (activeTool === 'brush' || activeTool === 'pencil' || activeTool === 'eraser' ||
+        activeTool === 'blob-brush' || activeTool === 'calligraphy-brush' || activeTool === 'scatter-brush' ||
+        activeTool === 'smooth-tool') {
       const layer = getActiveLayer();
       if (!layer) {
         toast.error('No active layer');
@@ -1021,16 +1052,21 @@ export function EditorCanvas() {
         return;
       }
       drawingRef.current = true;
-      clearStrokeCanvas();
-      const hardness = activeTool === 'pencil' ? 100 : toolOptions.brushHardness;
-      drawStrokeSegment(pt, pt, {
-        color: foreground,
-        size: toolOptions.brushSize,
-        hardness,
-        opacity: toolOptions.brushOpacity,
-        erase: activeTool === 'eraser',
-      });
-      previewStroke();
+      strokePointsRef.current = [pt];
+      // For blob/calligraphy/scatter/smooth tools, we draw directly on the layer
+      // For brush/pencil/eraser, we use the stroke canvas approach
+      if (activeTool === 'brush' || activeTool === 'pencil' || activeTool === 'eraser') {
+        clearStrokeCanvas();
+        const hardness = activeTool === 'pencil' ? 100 : toolOptions.brushHardness;
+        drawStrokeSegment(pt, pt, {
+          color: foreground,
+          size: toolOptions.brushSize,
+          hardness,
+          opacity: toolOptions.brushOpacity,
+          erase: activeTool === 'eraser',
+        });
+        previewStroke();
+      }
       lastPointRef.current = pt;
       return;
     }
@@ -1106,11 +1142,34 @@ export function EditorCanvas() {
       return;
     }
 
-    // Pen tool: add anchor point
-    if (activeTool === 'pen') {
-      // On Enter key, the path is committed (handled in keyboard section)
-      // For now, just add a point on click
+    // Pen tool / Curvature pen: add anchor point
+    if (activeTool === 'pen' || activeTool === 'curvature-pen') {
       penPointsRef.current.push({ x: pt.x, y: pt.y });
+      // For curvature pen, auto-generate smooth handles between points
+      if (activeTool === 'curvature-pen' && penPointsRef.current.length >= 2) {
+        const pts = penPointsRef.current;
+        for (let i = 0; i < pts.length; i++) {
+          const prev = pts[i - 1];
+          const next = pts[i + 1];
+          if (prev && next) {
+            // Auto-handle: point in the direction of the tangent
+            const dx = (next.x - prev.x) * 0.3;
+            const dy = (next.y - prev.y) * 0.3;
+            pts[i].h1 = { x: pts[i].x - dx, y: pts[i].y - dy };
+            pts[i].h2 = { x: pts[i].x + dx, y: pts[i].y + dy };
+          } else if (prev && !next) {
+            // End point
+            const dx = (pts[i].x - prev.x) * 0.3;
+            const dy = (pts[i].y - prev.y) * 0.3;
+            pts[i].h1 = { x: pts[i].x - dx, y: pts[i].y - dy };
+          } else if (!prev && next) {
+            // Start point
+            const dx = (next.x - pts[i].x) * 0.3;
+            const dy = (next.y - pts[i].y) * 0.3;
+            pts[i].h2 = { x: pts[i].x + dx, y: pts[i].y + dy };
+          }
+        }
+      }
       drawPenPath();
       forceRender((v) => v + 1);
       return;
@@ -1199,7 +1258,7 @@ export function EditorCanvas() {
       return;
     }
 
-    if (activeTool === 'gradient' || activeTool === 'shape-rect' || activeTool === 'shape-ellipse' || activeTool === 'shape-line') {
+    if (activeTool === 'gradient' || activeTool.startsWith('shape-')) {
       // Live preview on overlay canvas
       const canvas = compositeCanvasRef.current;
       if (!canvas) return;
@@ -1216,29 +1275,11 @@ export function EditorCanvas() {
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, docWidth, docHeight);
       } else {
-        const rgb = hexToRgb(foreground);
-        ctx.fillStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.6)`;
-        ctx.strokeStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.9)`;
-        ctx.lineWidth = toolOptions.shapeStrokeWidth;
-        const x = Math.min(start.x, pt.x);
-        const y = Math.min(start.y, pt.y);
-        const w = Math.abs(pt.x - start.x);
-        const h = Math.abs(pt.y - start.y);
-        if (activeTool === 'shape-rect') {
-          if (toolOptions.shapeFilled) ctx.fillRect(x, y, w, h);
-          if (toolOptions.shapeStrokeWidth > 0) ctx.strokeRect(x, y, w, h);
-        } else if (activeTool === 'shape-ellipse') {
-          ctx.beginPath();
-          ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-          if (toolOptions.shapeFilled) ctx.fill();
-          if (toolOptions.shapeStrokeWidth > 0) ctx.stroke();
-        } else if (activeTool === 'shape-line') {
-          ctx.beginPath();
-          ctx.moveTo(start.x, start.y);
-          ctx.lineTo(pt.x, pt.y);
-          ctx.lineWidth = Math.max(1, toolOptions.shapeStrokeWidth);
-          ctx.stroke();
-        }
+        // Use drawShapeOnCtx for preview with alpha
+        ctx.globalAlpha = 0.6;
+        const shapeName = activeTool.replace('shape-', '');
+        drawShapeOnCtx(ctx, Math.min(start.x, pt.x), Math.min(start.y, pt.y),
+          Math.abs(pt.x - start.x), Math.abs(pt.y - start.y), shapeName, start, pt);
       }
       ctx.restore();
       return;
@@ -1272,6 +1313,80 @@ export function EditorCanvas() {
       });
       previewStroke();
       lastPointRef.current = targetPt;
+      return;
+    }
+
+    // Blob brush / Calligraphy / Scatter — collect points and draw live
+    if (activeTool === 'blob-brush' || activeTool === 'calligraphy-brush' || activeTool === 'scatter-brush') {
+      const last = lastPointRef.current ?? pt;
+      strokePointsRef.current.push(pt);
+      const layer = getActiveLayer();
+      if (layer && !layer.locked) {
+        const ctx = layer.canvas.getContext('2d')!;
+        if (activeTool === 'blob-brush') {
+          // Draw filled circles along the path (merges automatically with existing paint)
+          ctx.save();
+          ctx.globalAlpha = toolOptions.brushOpacity / 100;
+          ctx.fillStyle = foreground;
+          const dist = Math.hypot(pt.x - last.x, pt.y - last.y);
+          const step = Math.max(1, toolOptions.brushSize / 6);
+          const steps = Math.max(1, Math.ceil(dist / step));
+          for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const px = last.x + (pt.x - last.x) * t;
+            const py = last.y + (pt.y - last.y) * t;
+            ctx.beginPath();
+            ctx.arc(px, py, toolOptions.brushSize / 2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+        } else if (activeTool === 'calligraphy-brush') {
+          // Draw using the calligraphy stroke function with accumulated points
+          const recentPoints = strokePointsRef.current.slice(-20);
+          if (recentPoints.length >= 2) {
+            drawCalligraphyStroke(ctx, recentPoints, toolOptions.brushSize, toolOptions.calligraphyAngle, foreground, toolOptions.brushOpacity);
+          }
+        } else if (activeTool === 'scatter-brush') {
+          // Scatter small shapes at the current point
+          drawScatterStroke(ctx, [last, pt], toolOptions.scatterCount, toolOptions.scatterSize, foreground, toolOptions.brushOpacity);
+        }
+        composite();
+      }
+      lastPointRef.current = pt;
+      return;
+    }
+
+    // Smooth tool — applies smoothing to the area under the cursor
+    if (activeTool === 'smooth-tool') {
+      // Smooth tool works on existing pixels: blur the area under the brush
+      const layer = getActiveLayer();
+      if (!layer || layer.locked) return;
+      const ctx = layer.canvas.getContext('2d')!;
+      const r = Math.max(2, toolOptions.brushSize / 2);
+      // Simple: apply a small box blur at the cursor position
+      const x = Math.max(0, Math.floor(pt.x - r));
+      const y = Math.max(0, Math.floor(pt.y - r));
+      const w = Math.min(layer.canvas.width - x, Math.floor(r * 2));
+      const h = Math.min(layer.canvas.height - y, Math.floor(r * 2));
+      if (w > 0 && h > 0) {
+        const imageData = ctx.getImageData(x, y, w, h);
+        const data = imageData.data;
+        const tmp = new Uint8ClampedArray(data);
+        const strength = toolOptions.smoothStrength / 100;
+        // Simple 3x3 blur with strength mix
+        for (let py = 1; py < h - 1; py++) {
+          for (let px = 1; px < w - 1; px++) {
+            const i = (py * w + px) * 4;
+            for (let c = 0; c < 3; c++) {
+              const avg = (tmp[i - 4 + c] + tmp[i + 4 + c] + tmp[i - w * 4 + c] + tmp[i + w * 4 + c]) / 4;
+              data[i + c] = tmp[i + c] * (1 - strength) + avg * strength;
+            }
+          }
+        }
+        ctx.putImageData(imageData, x, y);
+        composite();
+      }
+      lastPointRef.current = pt;
       return;
     }
 
@@ -1324,6 +1439,7 @@ export function EditorCanvas() {
     activeTool, toCanvasCoords, handlePan, createRectMask, setSelection,
     createLassoMask, docWidth, docHeight, composite, foreground, background,
     toolOptions, drawStrokeSegment, previewStroke, drawCloneStamp, drawHealStroke, applyLiquify,
+    drawShapeOnCtx, getActiveLayer, refreshThumbnail,
   ]);
 
   const onPointerUp = useCallback((e: React.PointerEvent) => {
@@ -1379,16 +1495,23 @@ export function EditorCanvas() {
       return;
     }
 
-    if (activeTool === 'shape-rect' && start) {
-      drawShape(start, pt, 'rect');
+    // Handle all shape tools
+    if (activeTool.startsWith('shape-') && start) {
+      const shapeName = activeTool.replace('shape-', '');
+      drawShape(start, pt, shapeName);
       return;
     }
-    if (activeTool === 'shape-ellipse' && start) {
-      drawShape(start, pt, 'ellipse');
-      return;
-    }
-    if (activeTool === 'shape-line' && start) {
-      drawShape(start, pt, 'line');
+
+    // Handle new brush tools (blob, calligraphy, scatter, smooth)
+    if (activeTool === 'blob-brush' || activeTool === 'calligraphy-brush' || activeTool === 'scatter-brush' || activeTool === 'smooth-tool') {
+      const layer = getActiveLayer();
+      if (layer) {
+        refreshThumbnail(layer.id);
+        pushHistory(activeTool.replace('-', ' '));
+      }
+      strokePointsRef.current = [];
+      lastPointRef.current = null;
+      composite();
       return;
     }
 
@@ -1454,7 +1577,9 @@ export function EditorCanvas() {
   const cursorStyle = useCallback((): string => {
     switch (activeTool) {
       case 'hand': return 'grab';
-      case 'brush': case 'pencil': case 'eraser': case 'clone-stamp': case 'heal-brush': return 'crosshair';
+      case 'brush': case 'pencil': case 'eraser': case 'clone-stamp': case 'heal-brush':
+      case 'blob-brush': case 'calligraphy-brush': case 'scatter-brush': case 'smooth-tool':
+        return 'crosshair';
       case 'eyedropper': return 'crosshair';
       case 'bucket': return 'crosshair';
       case 'marquee-rect': case 'marquee-ellipse': case 'lasso': case 'polygonal-lasso': case 'magnetic-lasso': case 'magic-wand': return 'crosshair';
@@ -1462,7 +1587,10 @@ export function EditorCanvas() {
       case 'move': return 'move';
       case 'zoom': return 'zoom-in';
       case 'crop': return 'crosshair';
-      case 'shape-rect': case 'shape-ellipse': case 'shape-line': case 'pen': return 'crosshair';
+      case 'shape-rect': case 'shape-ellipse': case 'shape-line': case 'pen': case 'curvature-pen':
+      case 'shape-star': case 'shape-polygon': case 'shape-arrow': case 'shape-heart':
+      case 'shape-speech-bubble': case 'shape-spiral':
+        return 'crosshair';
       case 'gradient': return 'crosshair';
       case 'liquify-push': case 'liquify-pucker': case 'liquify-bloat': case 'liquify-twirl': return 'crosshair';
       default: return 'default';
@@ -1508,7 +1636,7 @@ export function EditorCanvas() {
         return;
       }
       // Pen tool: Enter commits the path, Escape cancels
-      if (useEditorStore.getState().activeTool === 'pen') {
+      if (useEditorStore.getState().activeTool === 'pen' || useEditorStore.getState().activeTool === 'curvature-pen') {
         if (e.key === 'Enter') {
           e.preventDefault();
           commitPenPath();
