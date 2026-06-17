@@ -433,3 +433,380 @@ export function sampleColor(canvas: HTMLCanvasElement, x: number, y: number): RG
   const d = ctx.getImageData(x, y, 1, 1).data;
   return { r: d[0], g: d[1], b: d[2] };
 }
+
+// ============================================================================
+// AUTO UNBLUR - Smart deconvolution-based sharpening
+// Combines unsharp masking with edge-preserving enhancement
+// strength: 0-100 (default 50)
+// radius: 0-5 (default 1.5) - blur radius for unsharp mask
+// threshold: 0-50 (default 0) - minimum delta required for sharpening
+// ============================================================================
+
+export function autoUnblur(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  strength: number = 50,
+  radius: number = 1.5,
+  threshold: number = 0,
+) {
+  if (strength <= 0) return;
+
+  // Step 1: Create a blurred copy using box blur approximation
+  const original = ctx.getImageData(0, 0, w, h);
+  const blurred = new Uint8ClampedArray(original.data);
+
+  // Box blur with given radius
+  const r = Math.max(1, Math.round(radius));
+  for (let pass = 0; pass < 2; pass++) {
+    const src = pass === 0 ? blurred : blurred;
+    const tmp = new Uint8ClampedArray(src);
+    // Horizontal
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let rs = 0, gs = 0, bs = 0, count = 0;
+        for (let dx = -r; dx <= r; dx++) {
+          const px = Math.max(0, Math.min(w - 1, x + dx));
+          const i = (y * w + px) * 4;
+          rs += src[i]; gs += src[i + 1]; bs += src[i + 2];
+          count++;
+        }
+        const di = (y * w + x) * 4;
+        tmp[di] = rs / count; tmp[di + 1] = gs / count; tmp[di + 2] = bs / count;
+        tmp[di + 3] = src[di + 3];
+      }
+    }
+    // Vertical
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let rs = 0, gs = 0, bs = 0, count = 0;
+        for (let dy = -r; dy <= r; dy++) {
+          const py = Math.max(0, Math.min(h - 1, y + dy));
+          const i = (py * w + x) * 4;
+          rs += tmp[i]; gs += tmp[i + 1]; bs += tmp[i + 2];
+          count++;
+        }
+        const di = (y * w + x) * 4;
+        blurred[di] = rs / count; blurred[di + 1] = gs / count; blurred[di + 2] = bs / count;
+        blurred[di + 3] = tmp[di + 3];
+      }
+    }
+  }
+
+  // Step 2: Unsharp mask = original + amount * (original - blurred)
+  // With threshold to avoid sharpening noise
+  const amount = strength / 50; // 0-2
+  const data = original.data;
+  const result = new Uint8ClampedArray(data.length);
+  const threshSq = threshold * threshold * 3;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const dr = data[i] - blurred[i];
+    const dg = data[i + 1] - blurred[i + 1];
+    const db = data[i + 2] - blurred[i + 2];
+    const d2 = dr * dr + dg * dg + db * db;
+    if (d2 < threshSq) {
+      // Below threshold, keep original
+      result[i] = data[i];
+      result[i + 1] = data[i + 1];
+      result[i + 2] = data[i + 2];
+      result[i + 3] = data[i + 3];
+    } else {
+      result[i] = Math.max(0, Math.min(255, data[i] + amount * dr));
+      result[i + 1] = Math.max(0, Math.min(255, data[i + 1] + amount * dg));
+      result[i + 2] = Math.max(0, Math.min(255, data[i + 2] + amount * db));
+      result[i + 3] = data[i + 3];
+    }
+  }
+
+  // Step 3: Edge enhancement - boost high-frequency edges
+  // Use Sobel-like edge detection and add edges back
+  const edgeEnhance = strength / 100; // 0-1
+  const edgeData = new Uint8ClampedArray(result);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = (y * w + x) * 4;
+      // Sobel X
+      const gx =
+        -1 * result[((y - 1) * w + (x - 1)) * 4] +
+        2 * result[(y * w + (x - 1)) * 4] +
+        -1 * result[((y + 1) * w + (x - 1)) * 4] +
+        1 * result[((y - 1) * w + (x + 1)) * 4] +
+        2 * result[(y * w + (x + 1)) * 4] +
+        1 * result[((y + 1) * w + (x + 1)) * 4];
+      const gy =
+        -1 * result[((y - 1) * w + (x - 1)) * 4] +
+        2 * result[((y - 1) * w + x) * 4] +
+        -1 * result[((y - 1) * w + (x + 1)) * 4] +
+        1 * result[((y + 1) * w + (x - 1)) * 4] +
+        2 * result[((y + 1) * w + x) * 4] +
+        1 * result[((y + 1) * w + (x + 1)) * 4];
+      const edgeMag = Math.sqrt(gx * gx + gy * gy);
+      const boost = Math.min(255, edgeMag * edgeEnhance * 0.5);
+      edgeData[i] = Math.max(0, Math.min(255, result[i] + boost));
+      edgeData[i + 1] = Math.max(0, Math.min(255, result[i + 1] + boost));
+      edgeData[i + 2] = Math.max(0, Math.min(255, result[i + 2] + boost));
+    }
+  }
+
+  ctx.putImageData(new ImageData(edgeData, w, h), 0, 0);
+}
+
+// ============================================================================
+// ADDITIONAL FILTERS
+// ============================================================================
+
+// Add Gaussian noise (film grain effect)
+export function addNoise(ctx: CanvasRenderingContext2D, w: number, h: number, amount: number) {
+  if (amount <= 0) return;
+  applyPixelTransform(ctx, w, h, (r, g, b, a) => {
+    const n = (Math.random() - 0.5) * amount * 2.55;
+    return [
+      Math.max(0, Math.min(255, r + n)),
+      Math.max(0, Math.min(255, g + n)),
+      Math.max(0, Math.min(255, b + n)),
+      a,
+    ];
+  });
+}
+
+// Median filter for noise reduction (preserves edges better than blur)
+export function medianDenoise(ctx: CanvasRenderingContext2D, w: number, h: number, radius: number = 1) {
+  if (radius < 1) return;
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const src = imageData.data;
+  const dst = new Uint8ClampedArray(src.length);
+  const r = radius;
+  const size = (2 * r + 1) * (2 * r + 1);
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      for (let c = 0; c < 3; c++) {
+        const vals = new Array(size);
+        let k = 0;
+        for (let dy = -r; dy <= r; dy++) {
+          for (let dx = -r; dx <= r; dx++) {
+            const px = Math.max(0, Math.min(w - 1, x + dx));
+            const py = Math.max(0, Math.min(h - 1, y + dy));
+            vals[k++] = src[(py * w + px) * 4 + c];
+          }
+        }
+        vals.sort((a, b) => a - b);
+        dst[(y * w + x) * 4 + c] = vals[Math.floor(size / 2)];
+      }
+      dst[(y * w + x) * 4 + 3] = src[(y * w + x) * 4 + 3];
+    }
+  }
+  ctx.putImageData(new ImageData(dst, w, h), 0, 0);
+}
+
+// Vignette (darken edges)
+export function applyVignette(ctx: CanvasRenderingContext2D, w: number, h: number, amount: number, size: number) {
+  // amount: 0-100, size: 0-100 (0 = tight, 100 = wide)
+  const cx = w / 2;
+  const cy = h / 2;
+  const maxDist = Math.sqrt(cx * cx + cy * cy);
+  const innerRadius = (size / 100) * maxDist;
+  const outerRadius = maxDist;
+  applyPixelTransform(ctx, w, h, (r, g, b, a, x, y) => {
+    const dx = x - cx;
+    const dy = y - cy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist <= innerRadius) return [r, g, b, a];
+    const t = Math.min(1, (dist - innerRadius) / (outerRadius - innerRadius));
+    const factor = 1 - (amount / 100) * t;
+    return [r * factor, g * factor, b * factor, a];
+  });
+}
+
+// Edge detection (Sobel)
+export function applyEdgeDetect(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const src = imageData.data;
+  const dst = new Uint8ClampedArray(src.length);
+  // Convert to grayscale first
+  const gray = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    gray[i] = 0.299 * src[i * 4] + 0.587 * src[i * 4 + 1] + 0.114 * src[i * 4 + 2];
+  }
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const gx =
+        -gray[(y - 1) * w + (x - 1)] - 2 * gray[y * w + (x - 1)] - gray[(y + 1) * w + (x - 1)] +
+        gray[(y - 1) * w + (x + 1)] + 2 * gray[y * w + (x + 1)] + gray[(y + 1) * w + (x + 1)];
+      const gy =
+        -gray[(y - 1) * w + (x - 1)] - 2 * gray[(y - 1) * w + x] - gray[(y - 1) * w + (x + 1)] +
+        gray[(y + 1) * w + (x - 1)] + 2 * gray[(y + 1) * w + x] + gray[(y + 1) * w + (x + 1)];
+      const mag = Math.min(255, Math.sqrt(gx * gx + gy * gy));
+      const di = (y * w + x) * 4;
+      dst[di] = mag; dst[di + 1] = mag; dst[di + 2] = mag; dst[di + 3] = 255;
+    }
+  }
+  ctx.putImageData(new ImageData(dst, w, h), 0, 0);
+}
+
+// Emboss filter
+export function applyEmboss(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const src = imageData.data;
+  const dst = new Uint8ClampedArray(src.length);
+  const kernel = [-2, -1, 0, -1, 1, 1, 0, 1, 2];
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      for (let c = 0; c < 3; c++) {
+        let sum = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            sum += src[((y + dy) * w + (x + dx)) * 4 + c] * kernel[(dy + 1) * 3 + (dx + 1)];
+          }
+        }
+        const v = Math.max(0, Math.min(255, sum + 128));
+        dst[(y * w + x) * 4 + c] = v;
+      }
+      dst[(y * w + x) * 4 + 3] = src[(y * w + x) * 4 + 3];
+    }
+  }
+  ctx.putImageData(new ImageData(dst, w, h), 0, 0);
+}
+
+// Pixelate / Mosaic
+export function applyPixelate(ctx: CanvasRenderingContext2D, w: number, h: number, blockSize: number) {
+  if (blockSize < 2) return;
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  for (let by = 0; by < h; by += blockSize) {
+    for (let bx = 0; bx < w; bx += blockSize) {
+      // Sample center pixel
+      const cx = Math.min(w - 1, bx + Math.floor(blockSize / 2));
+      const cy = Math.min(h - 1, by + Math.floor(blockSize / 2));
+      const ci = (cy * w + cx) * 4;
+      const r = data[ci], g = data[ci + 1], b = data[ci + 2];
+      // Fill block
+      for (let y = by; y < Math.min(h, by + blockSize); y++) {
+        for (let x = bx; x < Math.min(w, bx + blockSize); x++) {
+          const i = (y * w + x) * 4;
+          data[i] = r; data[i + 1] = g; data[i + 2] = b;
+        }
+      }
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+// Posterize - reduce number of colors
+export function applyPosterize(ctx: CanvasRenderingContext2D, w: number, h: number, levels: number) {
+  const step = 255 / (levels - 1);
+  applyPixelTransform(ctx, w, h, (r, g, b, a) => [
+    Math.round(Math.round(r / step) * step),
+    Math.round(Math.round(g / step) * step),
+    Math.round(Math.round(b / step) * step),
+    a,
+  ]);
+}
+
+// Color temperature adjustment (warm = +, cool = -)
+export function applyColorTemperature(ctx: CanvasRenderingContext2D, w: number, h: number, temp: number) {
+  // temp: -100 (cool) to 100 (warm)
+  const rShift = temp * 0.8;
+  const bShift = -temp * 0.8;
+  applyPixelTransform(ctx, w, h, (r, g, b, a) => [
+    Math.max(0, Math.min(255, r + rShift)),
+    g,
+    Math.max(0, Math.min(255, b + bShift)),
+    a,
+  ]);
+}
+
+// ============================================================================
+// TRANSFORM OPERATIONS
+// ============================================================================
+
+// Rotate the entire image by 90, 180, or 270 degrees
+export function rotateCanvas(sourceCanvas: HTMLCanvasElement, degrees: 90 | 180 | 270): HTMLCanvasElement {
+  let newW: number, newH: number;
+  if (degrees === 90 || degrees === 270) {
+    newW = sourceCanvas.height;
+    newH = sourceCanvas.width;
+  } else {
+    newW = sourceCanvas.width;
+    newH = sourceCanvas.height;
+  }
+  const out = createBlankCanvas(newW, newH);
+  const ctx = out.getContext('2d')!;
+  ctx.save();
+  ctx.translate(newW / 2, newH / 2);
+  ctx.rotate((degrees * Math.PI) / 180);
+  ctx.drawImage(sourceCanvas, -sourceCanvas.width / 2, -sourceCanvas.height / 2);
+  ctx.restore();
+  return out;
+}
+
+// Flip canvas horizontally or vertically
+export function flipCanvas(sourceCanvas: HTMLCanvasElement, horizontal: boolean): HTMLCanvasElement {
+  const out = createBlankCanvas(sourceCanvas.width, sourceCanvas.height);
+  const ctx = out.getContext('2d')!;
+  ctx.save();
+  if (horizontal) {
+    ctx.translate(sourceCanvas.width, 0);
+    ctx.scale(-1, 1);
+  } else {
+    ctx.translate(0, sourceCanvas.height);
+    ctx.scale(1, -1);
+  }
+  ctx.drawImage(sourceCanvas, 0, 0);
+  ctx.restore();
+  return out;
+}
+
+// Scale canvas to new dimensions
+export function scaleCanvas(sourceCanvas: HTMLCanvasElement, newW: number, newH: number): HTMLCanvasElement {
+  const out = createBlankCanvas(newW, newH);
+  const ctx = out.getContext('2d')!;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(sourceCanvas, 0, 0, newW, newH);
+  return out;
+}
+
+// ============================================================================
+// SELECTION OPERATIONS
+// ============================================================================
+
+// Feather selection edges by a given radius
+export function featherSelection(mask: HTMLCanvasElement, radius: number): HTMLCanvasElement {
+  if (radius <= 0) return mask;
+  const w = mask.width, h = mask.height;
+  const ctx = mask.getContext('2d', { willReadFrequently: true })!;
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  // Box blur the alpha channel
+  const r = Math.max(1, Math.round(radius));
+  const tmp = new Uint8ClampedArray(data);
+  // Horizontal
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let sum = 0, count = 0;
+      for (let dx = -r; dx <= r; dx++) {
+        const px = Math.max(0, Math.min(w - 1, x + dx));
+        sum += tmp[(y * w + px) * 4 + 3];
+        count++;
+      }
+      data[(y * w + x) * 4 + 3] = sum / count;
+    }
+  }
+  // Vertical
+  const tmp2 = new Uint8ClampedArray(data);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let sum = 0, count = 0;
+      for (let dy = -r; dy <= r; dy++) {
+        const py = Math.max(0, Math.min(h - 1, y + dy));
+        sum += tmp2[(py * w + x) * 4 + 3];
+        count++;
+      }
+      data[(y * w + x) * 4 + 3] = sum / count;
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+  return mask;
+}

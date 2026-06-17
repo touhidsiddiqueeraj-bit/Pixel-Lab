@@ -19,6 +19,7 @@ export type ToolType =
   | 'shape-rect'
   | 'shape-ellipse'
   | 'shape-line'
+  | 'clone-stamp'
   | 'hand'
   | 'zoom';
 

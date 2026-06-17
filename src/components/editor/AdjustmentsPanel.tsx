@@ -11,10 +11,19 @@ import {
   applyFastBlur,
   applySharpen,
   autoRemoveBackground,
+  autoUnblur,
+  addNoise,
+  medianDenoise,
+  applyVignette,
+  applyEdgeDetect,
+  applyEmboss,
+  applyPixelate,
+  applyPosterize,
+  applyColorTemperature,
 } from '@/lib/image-processing';
 import { toast } from 'sonner';
 import { useState, useCallback } from 'react';
-import { Sparkles, SunMedium, Contrast, Droplets, Palette, CircleOff, Image as ImageIcon, Focus, Scissors, Wand2 } from 'lucide-react';
+import { Sparkles, SunMedium, Contrast, Droplets, Palette, CircleOff, Image as ImageIcon, Focus, Scissors, Wand2, Zap, Wind, Aperture, Grid3x3, Layers as LayersIcon, Thermometer, AudioWaveform } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -34,6 +43,20 @@ export function AdjustmentsPanel() {
   const [blurRadius, setBlurRadius] = useState(0);
   const [sharpenAmount, setSharpenAmount] = useState(0);
   const [bgTolerance, setBgTolerance] = useState(32);
+
+  // Auto unblur state
+  const [unblurStrength, setUnblurStrength] = useState(60);
+  const [unblurRadius, setUnblurRadius] = useState(1.5);
+  const [unblurThreshold, setUnblurThreshold] = useState(2);
+
+  // New filter state
+  const [noiseAmount, setNoiseAmount] = useState(15);
+  const [denoiseRadius, setDenoiseRadius] = useState(1);
+  const [vignetteAmount, setVignetteAmount] = useState(50);
+  const [vignetteSize, setVignetteSize] = useState(50);
+  const [pixelateSize, setPixelateSize] = useState(8);
+  const [posterizeLevels, setPosterizeLevels] = useState(4);
+  const [temperature, setTemperature] = useState(0);
 
   const getActive = useCallback(() => layers.find((l) => l.id === activeLayerId) ?? null, [layers, activeLayerId]);
 
@@ -69,22 +92,85 @@ export function AdjustmentsPanel() {
     toast.success('Background removed');
   }, [getActive, bgTolerance, replaceLayerCanvas, pushHistory]);
 
+  const handleAutoUnblur = useCallback(() => {
+    const layer = getActive();
+    if (!layer) {
+      toast.error('No active layer');
+      return;
+    }
+    if (layer.locked) {
+      toast.error('Layer is locked');
+      return;
+    }
+    const ctx = layer.canvas.getContext('2d')!;
+    // Use a promise-friendly toast for long operations
+    const tid = toast.loading('Deblurring image...');
+    setTimeout(() => {
+      try {
+        autoUnblur(ctx, layer.canvas.width, layer.canvas.height, unblurStrength, unblurRadius, unblurThreshold);
+        refreshThumbnail(layer.id);
+        pushHistory('Auto Unblur');
+        toast.success('Image deblurred', { id: tid });
+      } catch (e) {
+        toast.error('Failed to deblur image', { id: tid });
+      }
+    }, 50);
+  }, [getActive, unblurStrength, unblurRadius, unblurThreshold, refreshThumbnail, pushHistory]);
+
   const quickFilters = [
     { label: 'Grayscale', icon: <CircleOff size={14} />, action: () => applyAdjustment('Grayscale', (ctx, w, h) => applyGrayscale(ctx, w, h)) },
     { label: 'Invert', icon: <ImageIcon size={14} />, action: () => applyAdjustment('Invert', (ctx, w, h) => applyInvert(ctx, w, h)) },
     { label: 'Sepia', icon: <Palette size={14} />, action: () => applyAdjustment('Sepia', (ctx, w, h) => applySepia(ctx, w, h)) },
+    { label: 'Edge Detect', icon: <Aperture size={14} />, action: () => applyAdjustment('Edge Detect', (ctx, w, h) => applyEdgeDetect(ctx, w, h)) },
+    { label: 'Emboss', icon: <LayersIcon size={14} />, action: () => applyAdjustment('Emboss', (ctx, w, h) => applyEmboss(ctx, w, h)) },
+    { label: 'Denoise', icon: <Wind size={14} />, action: () => applyAdjustment('Denoise', (ctx, w, h) => medianDenoise(ctx, w, h, denoiseRadius)) },
   ];
 
   return (
     <div className="flex flex-col h-full bg-zinc-900 text-zinc-200 overflow-y-auto custom-scroll">
       <div className="px-3 py-2 border-b border-zinc-800 text-xs font-semibold uppercase tracking-wide text-zinc-400">
-        Adjustments
+        Adjustments & Filters
       </div>
 
       <div className="p-3 space-y-4">
+        {/* AUTO UNBLUR - prominent AI feature */}
+        <div className="space-y-2 p-3 rounded-lg bg-gradient-to-br from-emerald-900/30 to-sky-900/30 border border-emerald-700/40">
+          <div className="flex items-center gap-2 text-xs font-bold text-emerald-400">
+            <Zap size={14} />
+            <span>AI Auto Unblur</span>
+            <span className="ml-auto text-[9px] text-emerald-600 font-normal uppercase">Smart Deconvolution</span>
+          </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <Label className="text-zinc-400">Strength</Label>
+              <span className="text-zinc-300">{unblurStrength}</span>
+            </div>
+            <Slider value={[unblurStrength]} min={0} max={100} step={1} onValueChange={(v) => setUnblurStrength(v[0])} />
+            <div className="flex items-center justify-between text-xs">
+              <Label className="text-zinc-400">Radius</Label>
+              <span className="text-zinc-300">{unblurRadius.toFixed(1)}px</span>
+            </div>
+            <Slider value={[unblurRadius * 10]} min={1} max={50} step={1} onValueChange={(v) => setUnblurRadius(v[0] / 10)} />
+            <div className="flex items-center justify-between text-xs">
+              <Label className="text-zinc-400">Threshold</Label>
+              <span className="text-zinc-300">{unblurThreshold}</span>
+            </div>
+            <Slider value={[unblurThreshold]} min={0} max={30} step={1} onValueChange={(v) => setUnblurThreshold(v[0])} />
+            <Button
+              onClick={handleAutoUnblur}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs h-8"
+            >
+              <Zap size={12} className="mr-1" /> Unblur Image
+            </Button>
+            <p className="text-[10px] text-zinc-500 leading-snug">
+              Uses unsharp masking + Sobel edge enhancement to restore sharpness. Best for slightly blurred photos.
+            </p>
+          </div>
+        </div>
+
         {/* Auto background removal */}
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-xs font-semibold text-sky-400">
+        <div className="space-y-2 p-3 rounded-lg bg-gradient-to-br from-sky-900/30 to-purple-900/30 border border-sky-700/40">
+          <div className="flex items-center gap-2 text-xs font-bold text-sky-400">
             <Sparkles size={14} />
             <span>AI Auto Background Remove</span>
           </div>
@@ -101,7 +187,7 @@ export function AdjustmentsPanel() {
               <Wand2 size={12} className="mr-1" /> Remove Background
             </Button>
             <p className="text-[10px] text-zinc-500 leading-snug">
-              Smart edge-detection flood-fill. Best for images with solid or gradient backgrounds. Adjust tolerance for similar-color removal.
+              Smart edge-detection flood-fill. Best for images with solid or gradient backgrounds.
             </p>
           </div>
         </div>
@@ -151,6 +237,23 @@ export function AdjustmentsPanel() {
 
         <div className="h-px bg-zinc-800" />
 
+        {/* Color Temperature */}
+        <div className="space-y-2">
+          <div className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+            <Thermometer size={12} /> Color Temperature
+            <span className="ml-auto text-zinc-500">{temperature > 0 ? `+${temperature}` : temperature}</span>
+          </div>
+          <Slider value={[temperature]} min={-100} max={100} step={1} onValueChange={setTemperature} />
+          <Button
+            onClick={() => applyAdjustment('Color Temperature', (ctx, w, h) => applyColorTemperature(ctx, w, h, temperature))}
+            variant="secondary"
+            size="sm"
+            className="w-full h-7 text-xs"
+          >Apply Temperature</Button>
+        </div>
+
+        <div className="h-px bg-zinc-800" />
+
         {/* Blur & Sharpen */}
         <div className="space-y-2">
           <div className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
@@ -180,6 +283,77 @@ export function AdjustmentsPanel() {
             className="w-full h-7 text-xs"
             disabled={sharpenAmount <= 0}
           >Apply Sharpen</Button>
+        </div>
+
+        <div className="h-px bg-zinc-800" />
+
+        {/* Vignette */}
+        <div className="space-y-2">
+          <div className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+            <Aperture size={12} /> Vignette
+            <span className="ml-auto text-zinc-500">{vignetteAmount}</span>
+          </div>
+          <Slider value={[vignetteAmount]} min={0} max={100} step={1} onValueChange={setVignetteAmount} />
+          <div className="text-xs text-zinc-400">Size <span className="ml-auto text-zinc-500">{vignetteSize}</span></div>
+          <Slider value={[vignetteSize]} min={0} max={100} step={1} onValueChange={setVignetteSize} />
+          <Button
+            onClick={() => applyAdjustment('Vignette', (ctx, w, h) => applyVignette(ctx, w, h, vignetteAmount, vignetteSize))}
+            variant="secondary"
+            size="sm"
+            className="w-full h-7 text-xs"
+            disabled={vignetteAmount <= 0}
+          >Apply Vignette</Button>
+        </div>
+
+        <div className="h-px bg-zinc-800" />
+
+        {/* Noise */}
+        <div className="space-y-2">
+          <div className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+            <AudioWaveform size={12} /> Add Noise (Grain)
+            <span className="ml-auto text-zinc-500">{noiseAmount}</span>
+          </div>
+          <Slider value={[noiseAmount]} min={0} max={100} step={1} onValueChange={setNoiseAmount} />
+          <Button
+            onClick={() => applyAdjustment('Add Noise', (ctx, w, h) => addNoise(ctx, w, h, noiseAmount))}
+            variant="secondary"
+            size="sm"
+            className="w-full h-7 text-xs"
+            disabled={noiseAmount <= 0}
+          >Add Noise</Button>
+          <div className="text-xs text-zinc-400 mt-2">Denoise Radius <span className="ml-auto text-zinc-500">{denoiseRadius}</span></div>
+          <Slider value={[denoiseRadius]} min={1} max={3} step={1} onValueChange={setDenoiseRadius} />
+          <Button
+            onClick={() => applyAdjustment('Denoise', (ctx, w, h) => medianDenoise(ctx, w, h, denoiseRadius))}
+            variant="secondary"
+            size="sm"
+            className="w-full h-7 text-xs"
+          >Denoise (Median)</Button>
+        </div>
+
+        <div className="h-px bg-zinc-800" />
+
+        {/* Pixelate & Posterize */}
+        <div className="space-y-2">
+          <div className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+            <Grid3x3 size={12} /> Pixelate
+            <span className="ml-auto text-zinc-500">{pixelateSize}px</span>
+          </div>
+          <Slider value={[pixelateSize]} min={2} max={50} step={1} onValueChange={setPixelateSize} />
+          <Button
+            onClick={() => applyAdjustment('Pixelate', (ctx, w, h) => applyPixelate(ctx, w, h, pixelateSize))}
+            variant="secondary"
+            size="sm"
+            className="w-full h-7 text-xs"
+          >Apply Pixelate</Button>
+          <div className="text-xs text-zinc-400 mt-2">Posterize Levels <span className="ml-auto text-zinc-500">{posterizeLevels}</span></div>
+          <Slider value={[posterizeLevels]} min={2} max={32} step={1} onValueChange={setPosterizeLevels} />
+          <Button
+            onClick={() => applyAdjustment('Posterize', (ctx, w, h) => applyPosterize(ctx, w, h, posterizeLevels))}
+            variant="secondary"
+            size="sm"
+            className="w-full h-7 text-xs"
+          >Apply Posterize</Button>
         </div>
 
         <div className="h-px bg-zinc-800" />

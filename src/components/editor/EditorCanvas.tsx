@@ -55,6 +55,12 @@ export function EditorCanvas() {
   const strokeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   // Spacebar state for pan mode
   const spacePressed = useRef(false);
+  // Clone stamp source position
+  const cloneSourceRef = useRef<Point | null>(null);
+  // Clone stamp last paint position (for tracking delta)
+  const cloneLastRef = useRef<Point | null>(null);
+  // Snapshot of all layers (composite) for clone sampling
+  const cloneSampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [cursorPos, setCursorPos] = useState<Point | null>(null);
   const [, forceRender] = useState(0);
@@ -317,6 +323,63 @@ export function EditorCanvas() {
     }
     ctx.restore();
   }, [activeTool, composite, getActiveLayer, layers, activeLayerId, docWidth, docHeight, toolOptions.brushOpacity]);
+
+  // Clone stamp: copies pixels from clone source (offset by delta from current pos) onto the active layer
+  const drawCloneStamp = useCallback((from: Point, to: Point) => {
+    const layer = getActiveLayer();
+    if (!layer || !cloneSourceRef.current || !cloneSampleCanvasRef.current) return;
+    const source = cloneSourceRef.current;
+    const sample = cloneSampleCanvasRef.current;
+    // Compute delta: when we move from `from` to `to`, we sample from source + (to - from)
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const srcX = source.x + dx;
+    const srcY = source.y + dy;
+    const radius = Math.max(0.5, toolOptions.brushSize / 2);
+    const opacity = toolOptions.brushOpacity / 100;
+
+    // Draw a soft circular stamp from sample onto layer
+    const ctx = layer.canvas.getContext('2d')!;
+    ctx.save();
+    // Create a soft circular mask
+    const stampCanvas = createBlankCanvas(toolOptions.brushSize, toolOptions.brushSize);
+    const stampCtx = stampCanvas.getContext('2d')!;
+    // Draw a soft circle gradient as the brush alpha mask
+    const grad = stampCtx.createRadialGradient(
+      radius, radius, 0,
+      radius, radius, radius,
+    );
+    const hardness = toolOptions.brushHardness / 100;
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(Math.max(0, Math.min(1, hardness)), 'rgba(255,255,255,1)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    stampCtx.fillStyle = grad;
+    stampCtx.fillRect(0, 0, toolOptions.brushSize, toolOptions.brushSize);
+    // Use the stamp as a clipping mask
+    stampCtx.globalCompositeOperation = 'source-in';
+    // Draw the sampled region onto the stamp canvas
+    stampCtx.drawImage(
+      sample,
+      srcX - radius, srcY - radius, toolOptions.brushSize, toolOptions.brushSize,
+      0, 0, toolOptions.brushSize, toolOptions.brushSize,
+    );
+    // Draw the stamp onto the layer with the brush opacity
+    ctx.globalAlpha = opacity;
+    // If there's a selection, clip to it
+    if (selectionMask) {
+      const tmp = createBlankCanvas(docWidth, docHeight);
+      const tmpCtx = tmp.getContext('2d')!;
+      tmpCtx.drawImage(stampCanvas, to.x - radius, to.y - radius);
+      tmpCtx.globalCompositeOperation = 'destination-in';
+      tmpCtx.drawImage(selectionMask, 0, 0);
+      ctx.drawImage(tmp, to.x - radius, to.y - radius);
+    } else {
+      ctx.drawImage(stampCanvas, to.x - radius, to.y - radius);
+    }
+    ctx.restore();
+    // Update the composite preview
+    composite();
+  }, [getActiveLayer, toolOptions.brushSize, toolOptions.brushHardness, toolOptions.brushOpacity, selectionMask, docWidth, docHeight, composite]);
 
   // Selection creation helpers
   const createRectMask = useCallback((x: number, y: number, w: number, h: number, ellipse: boolean) => {
@@ -705,11 +768,49 @@ export function EditorCanvas() {
       lastPointRef.current = pt;
       return;
     }
+
+    // Clone stamp
+    if (activeTool === 'clone-stamp') {
+      const layer = getActiveLayer();
+      if (!layer) {
+        toast.error('No active layer');
+        return;
+      }
+      if (layer.locked) {
+        toast.error('Layer is locked');
+        return;
+      }
+      // Alt+Click sets source
+      if (e.altKey) {
+        cloneSourceRef.current = pt;
+        // Take a snapshot of the composite for sampling
+        const composite = compositeCanvasRef.current;
+        if (composite) {
+          const snap = createBlankCanvas(docWidth, docHeight);
+          const snapCtx = snap.getContext('2d')!;
+          snapCtx.drawImage(composite, 0, 0);
+          cloneSampleCanvasRef.current = snap;
+        }
+        toast.success(`Clone source set: ${Math.round(pt.x)}, ${Math.round(pt.y)}`);
+        return;
+      }
+      // Otherwise paint
+      if (!cloneSourceRef.current || !cloneSampleCanvasRef.current) {
+        toast.error('Alt+Click to set clone source first');
+        return;
+      }
+      drawingRef.current = true;
+      cloneLastRef.current = pt;
+      // Draw initial stamp
+      drawCloneStamp(pt, pt);
+      return;
+    }
   }, [
     activeTool, panX, panY, toCanvasCoords, setPan, setZoom, zoom,
     clearSelection, magicWand, toolOptions, foreground, bucketFill,
     addText, clearStrokeCanvas, drawStrokeSegment, previewStroke,
     setSelection, createLassoMask, setForeground, getActiveLayer,
+    docWidth, docHeight, drawCloneStamp,
   ]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
@@ -824,10 +925,26 @@ export function EditorCanvas() {
       lastPointRef.current = pt;
       return;
     }
+
+    // Clone stamp continuous painting
+    if (activeTool === 'clone-stamp') {
+      const last = cloneLastRef.current ?? pt;
+      // Paint along the line from last to pt
+      const dist = Math.hypot(pt.x - last.x, pt.y - last.y);
+      const step = Math.max(1, toolOptions.brushSize / 4);
+      const steps = Math.max(1, Math.ceil(dist / step));
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        const p = { x: last.x + (pt.x - last.x) * t, y: last.y + (pt.y - last.y) * t };
+        drawCloneStamp(last, p);
+      }
+      cloneLastRef.current = pt;
+      return;
+    }
   }, [
     activeTool, toCanvasCoords, handlePan, createRectMask, setSelection,
     createLassoMask, docWidth, docHeight, composite, foreground, background,
-    toolOptions, drawStrokeSegment, previewStroke,
+    toolOptions, drawStrokeSegment, previewStroke, drawCloneStamp,
   ]);
 
   const onPointerUp = useCallback((e: React.PointerEvent) => {
@@ -904,10 +1021,21 @@ export function EditorCanvas() {
       composite();
       return;
     }
+
+    if (activeTool === 'clone-stamp') {
+      const layer = getActiveLayer();
+      if (layer) {
+        refreshThumbnail(layer.id);
+        pushHistory('Clone Stamp');
+      }
+      cloneLastRef.current = null;
+      composite();
+      return;
+    }
   }, [
     activeTool, toCanvasCoords, panStartRef, selectionBounds, createLassoMask,
     setSelection, pushHistory, clearSelection, gradientFill, drawShape,
-    commitStrokeToLayer, clearStrokeCanvas, composite,
+    commitStrokeToLayer, clearStrokeCanvas, composite, getActiveLayer, refreshThumbnail,
   ]);
 
   // Wheel for zoom & pan
@@ -925,7 +1053,7 @@ export function EditorCanvas() {
   const cursorStyle = useCallback((): string => {
     switch (activeTool) {
       case 'hand': return 'grab';
-      case 'brush': case 'pencil': case 'eraser': return 'crosshair';
+      case 'brush': case 'pencil': case 'eraser': case 'clone-stamp': return 'crosshair';
       case 'eyedropper': return 'crosshair';
       case 'bucket': return 'crosshair';
       case 'marquee-rect': case 'marquee-ellipse': case 'lasso': case 'polygonal-lasso': case 'magnetic-lasso': case 'magic-wand': return 'crosshair';
@@ -969,7 +1097,7 @@ export function EditorCanvas() {
       const map: Record<string, ToolType> = {
         v: 'move', m: 'marquee-rect', l: 'lasso', w: 'magic-wand', c: 'crop',
         i: 'eyedropper', b: 'brush', e: 'eraser', g: 'bucket', t: 'text',
-        u: 'shape-rect', h: 'hand', z: 'zoom',
+        u: 'shape-rect', h: 'hand', z: 'zoom', s: 'clone-stamp',
       };
       if (e.key === ' ' && !e.repeat) {
         spacePressed.current = true;

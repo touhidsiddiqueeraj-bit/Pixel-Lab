@@ -19,6 +19,7 @@ import {
   Hand,
   ZoomIn,
   Triangle,
+  Stamp,
 } from 'lucide-react';
 import { useEditorStore } from '@/lib/editor-store';
 import { ToolType } from '@/lib/editor-types';
@@ -53,6 +54,7 @@ const TOOLS: { section: string; items: ToolDef[] }[] = [
       { type: 'brush', icon: <Brush size={18} />, label: 'Brush', shortcut: 'B' },
       { type: 'pencil', icon: <Pencil size={18} />, label: 'Pencil', shortcut: 'B' },
       { type: 'eraser', icon: <Eraser size={18} />, label: 'Eraser', shortcut: 'E' },
+      { type: 'clone-stamp', icon: <Stamp size={18} />, label: 'Clone Stamp', shortcut: 'S' },
       { type: 'bucket', icon: <PaintBucket size={18} />, label: 'Paint Bucket', shortcut: 'G' },
       { type: 'gradient', icon: <Palette size={18} />, label: 'Gradient', shortcut: 'G' },
     ],

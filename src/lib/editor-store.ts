@@ -14,6 +14,7 @@ import {
   canvasToDataUrl,
   generateThumbnail,
 } from './image-processing';
+import { featherSelection as featherMask } from './image-processing';
 
 const DEFAULT_TOOL_OPTIONS: ToolOptions = {
   brushSize: 20,
@@ -90,6 +91,9 @@ interface EditorState {
   clearSelection: () => void;
   selectAll: () => void;
   invertSelection: () => void;
+  featherSelection: (radius: number) => void;
+  expandSelection: (pixels: number) => void;
+  contractSelection: (pixels: number) => void;
 
   pushHistory: (label: string) => void;
   undo: () => void;
@@ -360,6 +364,78 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       // keep alpha
     }
     ctx.putImageData(imageData, 0, 0);
+    set({ selectionMask: selectionMask });
+  },
+
+  featherSelection: (radius) => {
+    const { selectionMask } = get();
+    if (!selectionMask || radius <= 0) return;
+    featherMask(selectionMask, radius);
+    set({ selectionMask: selectionMask });
+  },
+
+  expandSelection: (pixels) => {
+    const { selectionMask, docWidth, docHeight } = get();
+    if (!selectionMask || pixels <= 0) return;
+    // Dilate the mask
+    const ctx = selectionMask.getContext('2d', { willReadFrequently: true })!;
+    const imageData = ctx.getImageData(0, 0, docWidth, docHeight);
+    const src = imageData.data;
+    const dst = new Uint8ClampedArray(src);
+    const r = Math.max(1, Math.round(pixels));
+    for (let y = 0; y < docHeight; y++) {
+      for (let x = 0; x < docWidth; x++) {
+        const idx = (y * docWidth + x) * 4;
+        // Check if any neighbor within radius is selected
+        let maxAlpha = 0;
+        for (let dy = -r; dy <= r; dy++) {
+          for (let dx = -r; dx <= r; dx++) {
+            if (dx * dx + dy * dy > r * r) continue;
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || nx >= docWidth || ny < 0 || ny >= docHeight) continue;
+            const nIdx = (ny * docWidth + nx) * 4;
+            maxAlpha = Math.max(maxAlpha, src[nIdx + 3]);
+          }
+        }
+        dst[idx + 3] = maxAlpha;
+      }
+    }
+    ctx.putImageData(new ImageData(dst, docWidth, docHeight), 0, 0);
+    set({ selectionMask: selectionMask });
+  },
+
+  contractSelection: (pixels) => {
+    const { selectionMask, docWidth, docHeight } = get();
+    if (!selectionMask || pixels <= 0) return;
+    // Erode the mask
+    const ctx = selectionMask.getContext('2d', { willReadFrequently: true })!;
+    const imageData = ctx.getImageData(0, 0, docWidth, docHeight);
+    const src = imageData.data;
+    const dst = new Uint8ClampedArray(src);
+    const r = Math.max(1, Math.round(pixels));
+    for (let y = 0; y < docHeight; y++) {
+      for (let x = 0; x < docWidth; x++) {
+        const idx = (y * docWidth + x) * 4;
+        // Check if all neighbors within radius are selected
+        let minAlpha = 255;
+        for (let dy = -r; dy <= r; dy++) {
+          for (let dx = -r; dx <= r; dx++) {
+            if (dx * dx + dy * dy > r * r) continue;
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || nx >= docWidth || ny < 0 || ny >= docHeight) {
+              minAlpha = 0;
+              break;
+            }
+            const nIdx = (ny * docWidth + nx) * 4;
+            minAlpha = Math.min(minAlpha, src[nIdx + 3]);
+            if (minAlpha === 0) break;
+          }
+          if (minAlpha === 0) break;
+        }
+        dst[idx + 3] = minAlpha;
+      }
+    }
+    ctx.putImageData(new ImageData(dst, docWidth, docHeight), 0, 0);
     set({ selectionMask: selectionMask });
   },
 

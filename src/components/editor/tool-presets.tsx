@@ -17,6 +17,7 @@ import {
   Minus,
   Hand,
   ZoomIn,
+  Stamp,
 } from 'lucide-react';
 
 export const TOOL_PRESETS: Record<ToolType, { icon: React.ReactNode; label: string; hint: string }> = {
@@ -38,6 +39,7 @@ export const TOOL_PRESETS: Record<ToolType, { icon: React.ReactNode; label: stri
   'shape-rect': { icon: <Square size={16} />, label: 'Rectangle', hint: 'Drag to draw a rectangle.' },
   'shape-ellipse': { icon: <Circle size={16} />, label: 'Ellipse', hint: 'Drag to draw an ellipse.' },
   'shape-line': { icon: <Minus size={16} />, label: 'Line', hint: 'Drag to draw a line.' },
+  'clone-stamp': { icon: <Stamp size={16} />, label: 'Clone Stamp', hint: 'Alt+Click to set source, then paint to clone.' },
   'hand': { icon: <Hand size={16} />, label: 'Hand', hint: 'Drag to pan the canvas.' },
   'zoom': { icon: <ZoomIn size={16} />, label: 'Zoom', hint: 'Click to zoom in, Alt+Click to zoom out.' },
 };
