@@ -86,7 +86,7 @@ export function Toolbar() {
   const resetColors = useEditorStore((s) => s.resetColors);
 
   return (
-    <div className="flex flex-col items-center gap-1 bg-zinc-900 border-r border-zinc-800 px-1 py-2 w-12 overflow-y-auto custom-scroll shrink-0">
+    <div className="flex flex-col items-center gap-1 editor-surface border-r editor-border px-1 py-2 w-12 sm:w-12 overflow-y-auto custom-scroll shrink-0 no-select">
       <TooltipProvider delayDuration={300}>
         {TOOLS.map((section, si) => (
           <div key={si} className="flex flex-col items-center gap-1">
@@ -96,10 +96,10 @@ export function Toolbar() {
                   <button
                     onClick={() => setTool(tool.type)}
                     className={cn(
-                      'flex items-center justify-center w-9 h-9 rounded-md transition-colors',
+                      'flex items-center justify-center w-9 h-9 rounded-md transition-colors touch-target',
                       activeTool === tool.type
-                        ? 'bg-sky-600 text-white shadow-inner'
-                        : 'text-zinc-300 hover:bg-zinc-800 hover:text-white',
+                        ? 'editor-accent-bg text-white shadow-inner'
+                        : 'editor-text-muted hover:editor-surface-3 hover:editor-text',
                     )}
                   >
                     {tool.icon}
@@ -107,11 +107,11 @@ export function Toolbar() {
                 </TooltipTrigger>
                 <TooltipContent side="right" className="text-xs">
                   <div className="font-medium">{tool.label}</div>
-                  <div className="text-zinc-400">Shortcut: {tool.shortcut}</div>
+                  <div className="editor-text-muted">Shortcut: {tool.shortcut}</div>
                 </TooltipContent>
               </Tooltip>
             ))}
-            {si < TOOLS.length - 1 && <div className="w-6 h-px bg-zinc-700 my-1" />}
+            {si < TOOLS.length - 1 && <div className="w-6 h-px editor-border my-1" />}
           </div>
         ))}
 
@@ -137,14 +137,14 @@ export function Toolbar() {
           />
           <button
             onClick={swapColors}
-            className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-zinc-800 border border-zinc-600 text-zinc-200 flex items-center justify-center hover:bg-zinc-700"
+            className="absolute -top-1 -right-1 w-4 h-4 rounded-full editor-surface-2 editor-border editor-text-muted flex items-center justify-center hover:editor-surface-3"
             title="Swap colors (X)"
           >
             <Triangle size={8} className="rotate-90 fill-current" />
           </button>
           <button
             onClick={resetColors}
-            className="absolute -bottom-1 -left-1 w-4 h-4 rounded-full bg-zinc-800 border border-zinc-600 text-zinc-200 flex items-center justify-center text-[8px] hover:bg-zinc-700"
+            className="absolute -bottom-1 -left-1 w-4 h-4 rounded-full editor-surface-2 editor-border editor-text-muted flex items-center justify-center text-[8px] hover:editor-surface-3"
             title="Reset colors (D)"
           >
             <span className="font-bold">D</span>

@@ -253,67 +253,67 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
     toast.success(`Resized to ${newW}×${newH}`);
   }, [docWidth, docHeight, pushHistory]);
 
-  const itemClass = 'cursor-pointer flex justify-between items-center gap-4 hover:bg-sky-600 hover:text-white focus:bg-sky-600 focus:text-white';
+  const itemClass = 'cursor-pointer flex justify-between items-center gap-4 hover:editor-accent-bg hover:text-white focus:editor-accent-bg focus:text-white';
 
   return (
-    <div className="bg-zinc-900 border-b border-zinc-800 text-sm text-zinc-200 select-none px-2">
+    <div className="editor-surface border-b editor-border text-sm editor-text select-none px-2">
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelected} />
       <input ref={placeInputRef} type="file" accept="image/*" className="hidden" onChange={handlePlaceImage} />
 
       <Menubar className="bg-transparent border-0 shadow-none h-8 gap-0 p-0">
         {/* File menu */}
         <MenubarMenu>
-          <MenubarTrigger className="px-3 h-8 text-sm cursor-pointer hover:bg-zinc-800 rounded-sm data-[highlighted]:bg-zinc-800 data-[state=open]:bg-zinc-800">
+          <MenubarTrigger className="px-3 h-8 text-sm cursor-pointer hover:editor-surface-3 rounded-sm data-[highlighted]:editor-surface-3 data-[state=open]:editor-surface-3">
             File
           </MenubarTrigger>
-          <MenubarContent className="bg-zinc-900 border-zinc-700 text-zinc-200 min-w-[220px]">
+          <MenubarContent className="editor-surface editor-border editor-text min-w-[220px]">
             <MenubarItem className={itemClass} onClick={onOpenNewDoc}>
-              <span>New...</span><span className="text-xs text-zinc-500">Ctrl+N</span>
+              <span>New...</span><span className="text-xs editor-text-dim">Ctrl+N</span>
             </MenubarItem>
             <MenubarItem className={itemClass} onClick={handleOpenFile}>
-              <span>Open...</span><span className="text-xs text-zinc-500">Ctrl+O</span>
+              <span>Open...</span><span className="text-xs editor-text-dim">Ctrl+O</span>
             </MenubarItem>
             <MenubarItem className={itemClass} onClick={handlePlaceClick}>
               <span>Place Image...</span><span></span>
             </MenubarItem>
-            <MenubarSeparator className="bg-zinc-700" />
+            <MenubarSeparator className="editor-border" />
             <MenubarItem className={itemClass} onClick={() => handleExport('png')}>
-              <span>Export as PNG</span><span className="text-xs text-zinc-500">Ctrl+S</span>
+              <span>Export as PNG</span><span className="text-xs editor-text-dim">Ctrl+S</span>
             </MenubarItem>
             <MenubarItem className={itemClass} onClick={() => handleExport('jpeg')}>
-              <span>Export as JPEG</span><span className="text-xs text-zinc-500">Ctrl+Shift+S</span>
+              <span>Export as JPEG</span><span className="text-xs editor-text-dim">Ctrl+Shift+S</span>
             </MenubarItem>
           </MenubarContent>
         </MenubarMenu>
 
         {/* Edit menu */}
         <MenubarMenu>
-          <MenubarTrigger className="px-3 h-8 text-sm cursor-pointer hover:bg-zinc-800 rounded-sm data-[state=open]:bg-zinc-800">
+          <MenubarTrigger className="px-3 h-8 text-sm cursor-pointer hover:editor-surface-3 rounded-sm data-[state=open]:editor-surface-3">
             Edit
           </MenubarTrigger>
-          <MenubarContent className="bg-zinc-900 border-zinc-700 text-zinc-200 min-w-[220px]">
+          <MenubarContent className="editor-surface editor-border editor-text min-w-[220px]">
             <MenubarItem className={itemClass} onClick={undo} disabled={!useEditorStore.getState().canUndo()}>
-              <span>Undo</span><span className="text-xs text-zinc-500">Ctrl+Z</span>
+              <span>Undo</span><span className="text-xs editor-text-dim">Ctrl+Z</span>
             </MenubarItem>
             <MenubarItem className={itemClass} onClick={redo} disabled={!useEditorStore.getState().canRedo()}>
-              <span>Redo</span><span className="text-xs text-zinc-500">Ctrl+Y</span>
+              <span>Redo</span><span className="text-xs editor-text-dim">Ctrl+Y</span>
             </MenubarItem>
-            <MenubarSeparator className="bg-zinc-700" />
+            <MenubarSeparator className="editor-border" />
             <MenubarItem className={itemClass} onClick={selectAll}>
-              <span>Select All</span><span className="text-xs text-zinc-500">Ctrl+A</span>
+              <span>Select All</span><span className="text-xs editor-text-dim">Ctrl+A</span>
             </MenubarItem>
             <MenubarItem className={itemClass} onClick={clearSelection} disabled={!selectionMask}>
-              <span>Deselect</span><span className="text-xs text-zinc-500">Ctrl+D</span>
+              <span>Deselect</span><span className="text-xs editor-text-dim">Ctrl+D</span>
             </MenubarItem>
             <MenubarItem className={itemClass} onClick={invertSelection} disabled={!selectionMask}>
-              <span>Inverse Selection</span><span className="text-xs text-zinc-500">Ctrl+Shift+I</span>
+              <span>Inverse Selection</span><span className="text-xs editor-text-dim">Ctrl+Shift+I</span>
             </MenubarItem>
             {/* Select Modify submenu */}
             <MenubarSub>
-              <MenubarSubTrigger className="cursor-pointer hover:bg-sky-600 hover:text-white data-[highlighted]:bg-sky-600 data-[highlighted]:text-white">
+              <MenubarSubTrigger className="cursor-pointer hover:editor-accent-bg hover:text-white data-[highlighted]:editor-accent-bg data-[highlighted]:text-white">
                 Modify Selection
               </MenubarSubTrigger>
-              <MenubarSubContent className="bg-zinc-900 border-zinc-700 text-zinc-200 min-w-[200px]">
+              <MenubarSubContent className="editor-surface editor-border editor-text min-w-[200px]">
                 <MenubarItem className={itemClass} onClick={() => {
                   const r = prompt('Feather radius (px):', '5');
                   if (r === null) return;
@@ -337,7 +337,7 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
                 </MenubarItem>
               </MenubarSubContent>
             </MenubarSub>
-            <MenubarSeparator className="bg-zinc-700" />
+            <MenubarSeparator className="editor-border" />
             <MenubarItem className={itemClass} onClick={() => {
               const s = prompt('Unblur strength (0-100, default 60):', '60');
               if (s === null) return;
@@ -366,19 +366,19 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
 
         {/* Image menu */}
         <MenubarMenu>
-          <MenubarTrigger className="px-3 h-8 text-sm cursor-pointer hover:bg-zinc-800 rounded-sm data-[state=open]:bg-zinc-800">
+          <MenubarTrigger className="px-3 h-8 text-sm cursor-pointer hover:editor-surface-3 rounded-sm data-[state=open]:editor-surface-3">
             Image
           </MenubarTrigger>
-          <MenubarContent className="bg-zinc-900 border-zinc-700 text-zinc-200 min-w-[220px]">
+          <MenubarContent className="editor-surface editor-border editor-text min-w-[220px]">
             <MenubarItem className={itemClass} onClick={handleResizeDoc}>
-              <span>Image Size...</span><span className="text-xs text-zinc-500">Ctrl+Alt+I</span>
+              <span>Image Size...</span><span className="text-xs editor-text-dim">Ctrl+Alt+I</span>
             </MenubarItem>
             {/* Transform submenu */}
             <MenubarSub>
-              <MenubarSubTrigger className="cursor-pointer hover:bg-sky-600 hover:text-white data-[highlighted]:bg-sky-600 data-[highlighted]:text-white">
+              <MenubarSubTrigger className="cursor-pointer hover:editor-accent-bg hover:text-white data-[highlighted]:editor-accent-bg data-[highlighted]:text-white">
                 Transform
               </MenubarSubTrigger>
-              <MenubarSubContent className="bg-zinc-900 border-zinc-700 text-zinc-200 min-w-[200px]">
+              <MenubarSubContent className="editor-surface editor-border editor-text min-w-[200px]">
                 <MenubarItem className={itemClass} onClick={() => handleTransform('rotate90')}>
                   <span>Rotate 90° CW</span><span></span>
                 </MenubarItem>
@@ -388,7 +388,7 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
                 <MenubarItem className={itemClass} onClick={() => handleTransform('rotate270')}>
                   <span>Rotate 90° CCW</span><span></span>
                 </MenubarItem>
-                <MenubarSeparator className="bg-zinc-700" />
+                <MenubarSeparator className="editor-border" />
                 <MenubarItem className={itemClass} onClick={() => handleTransform('flipH')}>
                   <span>Flip Horizontal</span><span></span>
                 </MenubarItem>
@@ -397,7 +397,7 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
                 </MenubarItem>
               </MenubarSubContent>
             </MenubarSub>
-            <MenubarSeparator className="bg-zinc-700" />
+            <MenubarSeparator className="editor-border" />
             <MenubarItem className={itemClass} onClick={() => {
               const b = prompt('Brightness (-100 to 100):', '0');
               const c = prompt('Contrast (-100 to 100):', '0');
@@ -415,7 +415,7 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
             }}>
               <span>Hue/Saturation...</span><span></span>
             </MenubarItem>
-            <MenubarSeparator className="bg-zinc-700" />
+            <MenubarSeparator className="editor-border" />
             <MenubarItem className={itemClass} onClick={() => runFilter('Grayscale', (ctx, w, h) => applyGrayscale(ctx, w, h))}>
               <span>Grayscale</span><span></span>
             </MenubarItem>
@@ -437,12 +437,12 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
 
         {/* Layer menu */}
         <MenubarMenu>
-          <MenubarTrigger className="px-3 h-8 text-sm cursor-pointer hover:bg-zinc-800 rounded-sm data-[state=open]:bg-zinc-800">
+          <MenubarTrigger className="px-3 h-8 text-sm cursor-pointer hover:editor-surface-3 rounded-sm data-[state=open]:editor-surface-3">
             Layer
           </MenubarTrigger>
-          <MenubarContent className="bg-zinc-900 border-zinc-700 text-zinc-200 min-w-[220px]">
+          <MenubarContent className="editor-surface editor-border editor-text min-w-[220px]">
             <MenubarItem className={itemClass} onClick={() => { addLayer(); pushHistory('New Layer'); }}>
-              <span>New Layer</span><span className="text-xs text-zinc-500">Ctrl+Shift+N</span>
+              <span>New Layer</span><span className="text-xs editor-text-dim">Ctrl+Shift+N</span>
             </MenubarItem>
             <MenubarItem className={itemClass} onClick={() => activeLayerId && duplicateLayer(activeLayerId)} disabled={!activeLayerId}>
               <span>Duplicate Layer</span><span></span>
@@ -450,9 +450,9 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
             <MenubarItem className={itemClass} onClick={() => activeLayerId && deleteLayer(activeLayerId)} disabled={layers.length <= 1 || !activeLayerId}>
               <span>Delete Layer</span><span></span>
             </MenubarItem>
-            <MenubarSeparator className="bg-zinc-700" />
+            <MenubarSeparator className="editor-border" />
             <MenubarItem className={itemClass} onClick={() => activeLayerId && mergeDown(activeLayerId)} disabled={!activeLayerId || layers.findIndex((l) => l.id === activeLayerId) <= 0}>
-              <span>Merge Down</span><span className="text-xs text-zinc-500">Ctrl+E</span>
+              <span>Merge Down</span><span className="text-xs editor-text-dim">Ctrl+E</span>
             </MenubarItem>
             <MenubarItem className={itemClass} onClick={mergeVisible}>
               <span>Merge Visible</span><span></span>
@@ -460,7 +460,7 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
             <MenubarItem className={itemClass} onClick={flattenImage}>
               <span>Flatten Image</span><span></span>
             </MenubarItem>
-            <MenubarSeparator className="bg-zinc-700" />
+            <MenubarSeparator className="editor-border" />
             <MenubarItem className={itemClass} onClick={() => {
               const layer = getActiveLayer();
               if (!layer) return;
@@ -474,10 +474,10 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
             </MenubarItem>
             {/* Layer Effects submenu */}
             <MenubarSub>
-              <MenubarSubTrigger className="cursor-pointer hover:bg-sky-600 hover:text-white data-[highlighted]:bg-sky-600 data-[highlighted]:text-white">
+              <MenubarSubTrigger className="cursor-pointer hover:editor-accent-bg hover:text-white data-[highlighted]:editor-accent-bg data-[highlighted]:text-white">
                 Layer Effects
               </MenubarSubTrigger>
-              <MenubarSubContent className="bg-zinc-900 border-zinc-700 text-zinc-200 min-w-[220px]">
+              <MenubarSubContent className="editor-surface editor-border editor-text min-w-[220px]">
                 <MenubarItem className={itemClass} onClick={() => {
                   const layer = getActiveLayer();
                   if (!layer || layer.locked) { toast.error('No active layer or layer locked'); return; }
@@ -530,12 +530,12 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
 
         {/* Filter menu */}
         <MenubarMenu>
-          <MenubarTrigger className="px-3 h-8 text-sm cursor-pointer hover:bg-zinc-800 rounded-sm data-[state=open]:bg-zinc-800">
+          <MenubarTrigger className="px-3 h-8 text-sm cursor-pointer hover:editor-surface-3 rounded-sm data-[state=open]:editor-surface-3">
             Filter
           </MenubarTrigger>
-          <MenubarContent className="bg-zinc-900 border-zinc-700 text-zinc-200 min-w-[220px]">
+          <MenubarContent className="editor-surface editor-border editor-text min-w-[220px]">
             <MenubarItem className={itemClass} onClick={() => handleAutoUnblur(60, 1.5, 2)}>
-              <span>Auto Unblur (Quick)</span><span className="text-xs text-zinc-500">Ctrl+Shift+U</span>
+              <span>Auto Unblur (Quick)</span><span className="text-xs editor-text-dim">Ctrl+Shift+U</span>
             </MenubarItem>
             <MenubarItem className={itemClass} onClick={() => {
               const s = prompt('Unblur strength (0-100, default 60):', '60');
@@ -552,7 +552,7 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
             }}>
               <span>Auto Unblur (Custom)...</span><span></span>
             </MenubarItem>
-            <MenubarSeparator className="bg-zinc-700" />
+            <MenubarSeparator className="editor-border" />
             <MenubarItem className={itemClass} onClick={() => {
               const r = prompt('Blur radius (px):', '5');
               if (r === null) return;
@@ -570,7 +570,7 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
             <MenubarItem className={itemClass} onClick={() => runFilter('Denoise', (ctx, w, h) => medianDenoise(ctx, w, h, 1))}>
               <span>Denoise (Median)</span><span></span>
             </MenubarItem>
-            <MenubarSeparator className="bg-zinc-700" />
+            <MenubarSeparator className="editor-border" />
             <MenubarItem className={itemClass} onClick={() => {
               const a = prompt('Noise amount (0-100):', '15');
               if (a === null) return;
@@ -587,7 +587,7 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
             }}>
               <span>Vignette...</span><span></span>
             </MenubarItem>
-            <MenubarSeparator className="bg-zinc-700" />
+            <MenubarSeparator className="editor-border" />
             <MenubarItem className={itemClass} onClick={() => runFilter('Edge Detect', (ctx, w, h) => applyEdgeDetect(ctx, w, h))}>
               <span>Edge Detect (Sobel)</span><span></span>
             </MenubarItem>
@@ -618,17 +618,105 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
           </MenubarContent>
         </MenubarMenu>
 
+        {/* Vector menu */}
+        <MenubarMenu>
+          <MenubarTrigger className="px-3 h-8 text-sm cursor-pointer hover:editor-surface-3 rounded-sm data-[state=open]:editor-surface-3">
+            Vector
+          </MenubarTrigger>
+          <MenubarContent className="editor-surface editor-border editor-text min-w-[220px]">
+            <MenubarItem className={itemClass} onClick={() => {
+              window.dispatchEvent(new CustomEvent('open-vectorize-dialog'));
+            }}>
+              <span>Vectorize Image...</span><span className="text-xs editor-text-dim">Ctrl+Shift+V</span>
+            </MenubarItem>
+            <MenubarItem className={itemClass} onClick={() => {
+              // Quick vectorize with default settings via the dialog
+              window.dispatchEvent(new CustomEvent('open-vectorize-dialog'));
+            }}>
+              <span>Quick Vectorize</span><span></span>
+            </MenubarItem>
+            <MenubarSeparator className="editor-border" />
+            <MenubarItem className={itemClass} onClick={() => {
+              const layer = getActiveLayer();
+              if (!layer) {
+                toast.error('No active layer');
+                return;
+              }
+              // Export current layer as SVG via quick vectorize
+              const tid = toast.loading('Vectorizing...');
+              setTimeout(async () => {
+                try {
+                  const { vectorizeImage } = await import('@/lib/vectorize');
+                  const result = vectorizeImage(layer.canvas, {
+                    numColors: 8,
+                    smoothing: 50,
+                    detail: 60,
+                    blurRadius: 1,
+                  });
+                  const blob = new Blob([result.svg], { type: 'image/svg+xml' });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.download = `vectorized-${Date.now()}.svg`;
+                  link.click();
+                  URL.revokeObjectURL(url);
+                  toast.success(`SVG exported: ${result.paths.length} paths`, { id: tid });
+                } catch (e) {
+                  toast.error('Vectorization failed', { id: tid });
+                }
+              }, 50);
+            }}>
+              <span>Export as SVG (Quick)</span><span></span>
+            </MenubarItem>
+            <MenubarSeparator className="editor-border" />
+            <MenubarItem className={itemClass} onClick={() => {
+              const layer = getActiveLayer();
+              if (!layer) {
+                toast.error('No active layer');
+                return;
+              }
+              const tid = toast.loading('Vectorizing with high detail...');
+              setTimeout(async () => {
+                try {
+                  const { vectorizeImage, svgToCanvas } = await import('@/lib/vectorize');
+                  const result = vectorizeImage(layer.canvas, {
+                    numColors: 16,
+                    smoothing: 30,
+                    detail: 80,
+                    blurRadius: 0.5,
+                  });
+                  const canvas = await svgToCanvas(result.svg, result.width, result.height);
+                  const layerId = addLayer('Vectorized (High Detail)');
+                  const state = useEditorStore.getState();
+                  const newLayer = state.layers.find((l) => l.id === layerId);
+                  if (newLayer) {
+                    const ctx = newLayer.canvas.getContext('2d')!;
+                    ctx.drawImage(canvas, 0, 0);
+                    refreshThumbnail(layerId);
+                  }
+                  pushHistory('Vectorize High Detail');
+                  toast.success(`Added vectorized layer: ${result.paths.length} paths`, { id: tid });
+                } catch (e) {
+                  toast.error('Vectorization failed', { id: tid });
+                }
+              }, 50);
+            }}>
+              <span>Vectorize to New Layer (Detailed)</span><span></span>
+            </MenubarItem>
+          </MenubarContent>
+        </MenubarMenu>
+
         {/* View menu */}
         <MenubarMenu>
-          <MenubarTrigger className="px-3 h-8 text-sm cursor-pointer hover:bg-zinc-800 rounded-sm data-[state=open]:bg-zinc-800">
+          <MenubarTrigger className="px-3 h-8 text-sm cursor-pointer hover:editor-surface-3 rounded-sm data-[state=open]:editor-surface-3">
             View
           </MenubarTrigger>
-          <MenubarContent className="bg-zinc-900 border-zinc-700 text-zinc-200 min-w-[220px]">
+          <MenubarContent className="editor-surface editor-border editor-text min-w-[220px]">
             <MenubarItem className={itemClass} onClick={() => setZoom(useEditorStore.getState().zoom * 1.25)}>
-              <span>Zoom In</span><span className="text-xs text-zinc-500">Ctrl++</span>
+              <span>Zoom In</span><span className="text-xs editor-text-dim">Ctrl++</span>
             </MenubarItem>
             <MenubarItem className={itemClass} onClick={() => setZoom(useEditorStore.getState().zoom / 1.25)}>
-              <span>Zoom Out</span><span className="text-xs text-zinc-500">Ctrl+-</span>
+              <span>Zoom Out</span><span className="text-xs editor-text-dim">Ctrl+-</span>
             </MenubarItem>
             <MenubarItem className={itemClass} onClick={() => setZoom(1)}>
               <span>Actual Size (100%)</span><span></span>

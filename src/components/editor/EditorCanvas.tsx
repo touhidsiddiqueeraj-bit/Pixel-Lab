@@ -1091,6 +1091,7 @@ export function EditorCanvas() {
         else if (e.key === '+' || e.key === '=') { e.preventDefault(); setZoom(zoom * 1.25); }
         else if (e.key === '-') { e.preventDefault(); setZoom(zoom / 1.25); }
         else if (e.key === '0') { e.preventDefault(); setZoom(1); }
+        else if (e.key === 'v' && e.shiftKey) { e.preventDefault(); window.dispatchEvent(new CustomEvent('open-vectorize-dialog')); }
         return;
       }
 
@@ -1167,7 +1168,7 @@ export function EditorCanvas() {
   return (
     <div
       ref={containerRef}
-      className="relative flex-1 overflow-hidden bg-zinc-800"
+      className="relative flex-1 overflow-hidden editor-canvas-bg"
       onWheel={onWheel}
       style={{ cursor: cursorStyle() }}
     >
@@ -1208,7 +1209,7 @@ export function EditorCanvas() {
       </div>
 
       {/* Status overlays */}
-      <div className="absolute bottom-2 left-2 bg-zinc-900/80 backdrop-blur px-2 py-1 rounded text-[10px] text-zinc-300 font-mono pointer-events-none">
+      <div className="absolute bottom-2 left-2 editor-surface/80 backdrop-blur px-2 py-1 rounded text-[10px] editor-text font-mono pointer-events-none">
         {docWidth} × {docHeight}px · {Math.round(zoom * 100)}%
         {cursorPos && ` · ${Math.round(cursorPos.x)}, ${Math.round(cursorPos.y)}`}
       </div>

@@ -1,66 +1,90 @@
-# Photoshop Clone - Worklog
+# Photoshop Clone - Worklog v4
 
 ---
-Task ID: photoshop-clone-v2
+Task ID: photoshop-clone-v4
 Agent: main (Super Z)
-Task: Add more features to the Photoshop clone, including auto unblur, and use the app to verify no bugs persist
+Task: Add vectorize functionality (image to SVG) and make the app both mobile and desktop friendly with auto light/dark mode detection
 
 Work Log:
-- Implemented Auto Unblur feature using unsharp masking + Sobel edge enhancement
-  * Strength (0-100), Radius (0.1-5.0), Threshold (0-30) parameters
-  * Available in Adjust panel (prominent emerald-themed card) and Filter menu (Quick + Custom)
-- Added new filters: Add Noise (film grain), Median Denoise, Vignette, Edge Detect (Sobel), Emboss, Pixelate, Posterize, Color Temperature
-- Added Transform operations: Rotate 90/180/270, Flip Horizontal/Vertical (in Image menu submenu)
-- Added Image Size resize for the whole document (with proper scaling of all layers)
-- Added Clone Stamp tool (Alt+Click to set source, then paint to clone)
-  * Soft brush with adjustable size, hardness, opacity
-  * Continuous painting with interpolation between points
-  * Selection-aware (respects active selection mask)
-- Added Selection Modify submenu: Feather, Expand, Contract (with radius-based dilation/erosion)
-- Added Layer Effects submenu: Drop Shadow, Stroke, Outer Glow (destructive bake-in)
-- Added Sonner Toaster to layout.tsx (toasts weren't visible before - fixed)
-- Updated AdjustmentsPanel with all new filters in slider form
-- Updated MenuBar with all new menu items and submenus
-- Updated Toolbar to include Clone Stamp tool
-- Updated tool-presets.tsx to include clone-stamp
-- Updated editor-types.ts to add 'clone-stamp' to ToolType
-- Updated editor-store.ts with featherSelection, expandSelection, contractSelection actions
-- Updated image-processing.ts with autoUnblur, addNoise, medianDenoise, applyVignette, applyEdgeDetect, applyEmboss, applyPixelate, applyPosterize, applyColorTemperature, rotateCanvas, flipCanvas, scaleCanvas, featherSelection functions
+- Created vectorization library (src/lib/vectorize.ts) with:
+  * Median cut color quantization (2-32 colors)
+  * Moore neighborhood boundary tracing
+  * Ramer-Douglas-Peucker path simplification (with adaptive tolerance based on path size)
+  * Quadratic Bezier curve smoothing for SVG paths
+  * SVG generation with proper viewBox
+  * SVG-to-canvas rendering for layer display
+  * Performance: caps working resolution to 600px max dimension
+- Created VectorizeDialog component with:
+  * Live preview of vectorized result
+  * Sliders for: Number of Colors (2-32), Smoothing (0-100), Detail (0-100), Pre-blur (0-3px)
+  * Output mode: New Layer or Replace Layer
+  * Color palette display
+  * Export SVG button
+  * Apply to layer button
+- Added Vector menu to MenuBar with:
+  * Vectorize Image... (opens dialog, Ctrl+Shift+V)
+  * Quick Vectorize (opens dialog)
+  * Export as SVG (Quick) - one-click SVG export
+  * Vectorize to New Layer (Detailed) - 16 colors, high detail
+- Added Ctrl+Shift+V keyboard shortcut
+- Added Vectorize quick button in title bar (with Spline icon)
+
+Theme & Responsive:
+- Installed next-themes via ThemeProvider in layout.tsx
+  * defaultTheme="system", enableSystem=true
+  * Auto-detects prefers-color-scheme from OS
+- Created ThemeToggle component (Light/Dark/System dropdown)
+- Added viewport meta with themeColor for light/dark
+- Added editor-specific CSS variables for both light and dark themes:
+  * --editor-bg, --editor-surface, --editor-surface-2, --editor-surface-3
+  * --editor-border, --editor-text, --editor-text-muted, --editor-text-dim
+  * --editor-accent, --editor-canvas-bg, --checker-light, --checker-dark
+- Created utility classes: editor-bg, editor-surface, editor-text, etc.
+- Updated ALL editor components to use theme-aware classes (replaced bg-zinc-*, text-zinc-*, border-zinc-*)
+- Updated checkerboard pattern to be theme-aware
+- Added smooth theme transitions (0.15s ease)
+- Added touch-friendly tap targets (min 44x44px)
+- Added no-select class to prevent text selection on UI
+- Added overscroll-behavior: none to prevent pull-to-refresh
+
+Mobile Responsive Layout:
+- PhotoEditor rewritten with mobile detection (window.innerWidth < 768)
+- Mobile: hamburger menu button opens menu in Sheet (left side)
+- Mobile: floating "Open Panels" button (bottom-right) opens panels in Sheet (right side)
+- Mobile: title bar adapts (hides some info, smaller padding)
+- Mobile: OptionsBar hides labels on small screens, smaller sliders
+- Desktop: collapsible right panels via Toggle Panels button
+- All components use responsive classes (sm:, md: prefixes)
+
+Bug Fixes:
+- Fixed vectorize producing 0 paths: simplifyPath was reducing 500+ point boundaries to 2 points
+  * Root cause: RDP algorithm with closed paths (start≈end) had len=0 line, used wrong distance metric
+  * Fix: Added adaptive tolerance based on path bounding box size (0-5% of path size based on smoothing)
+  * Fix: Properly handle closed paths by removing duplicate endpoint before RDP, then re-adding
+- Fixed hasTransparent check performance (replaced Array.from().some with simple loop)
+- Fixed flood fill duplicate regionPixels.push bug
 
 Testing (via Agent Browser):
-- Verified page loads with no errors after fresh reload
-- Verified Auto Unblur: applied successfully, "Image deblurred" toast appeared, history recorded "Auto Unblur"
-- Verified Auto Background Remove: works on the image layer (checkerboard shows through where bg was removed)
-- Verified Filter menu items: All 13 filter options present (Auto Unblur Quick/Custom, Gaussian Blur, Sharpen, Denoise, Add Noise, Vignette, Edge Detect, Emboss, Pixelate, Posterize, Color Temperature)
-- Verified Image menu: Image Size resize works (canvas resized from 640x400 to 300x200), Transform submenu with all 5 options
-- Verified Layer menu: All options including new Layer Effects submenu (Drop Shadow, Stroke, Outer Glow)
-- Verified Edit menu: All options including new Modify Selection submenu (Feather, Expand, Contract)
-- Verified Clone Stamp tool: Active when 's' key pressed, Alt+Click sets source (toast appears), painting clones pixels
-- Verified Brush tool: Drawing on canvas produces visible strokes
-- Verified History panel: Records all operations (Open Image, Auto Unblur, Vignette, Edge Detect, Brush Stroke, etc.) and allows jumping to any state
-- Verified Color panel: SV picker, hue slider, hex input, RGB inputs, swatches all work
-- Verified Layers panel: Add/duplicate/merge/delete, visibility toggle, opacity, blend modes, lock, rename
-- Verified keyboard shortcuts: V/M/L/W/C/I/B/E/G/T/U/H/Z/S all work, X swap colors, D reset, [ ] brush size, Ctrl+Z/Y/A/D
-- Verified Gaussian Blur via prompt dialog: works with dialog accept
-- Verified Edge Detect: produces grayscale edge map
-- Verified Emboss: produces embossed effect
-- Verified File menu: New, Open, Place Image, Export PNG/JPEG all work (PNG exported successfully)
-
-Bug Fixes During Testing:
-- Fixed NoiseIcon import error (doesn't exist in lucide-react, replaced with AudioWaveform)
-- Fixed "Layer is lockased" typo in AdjustmentsPanel (was "lockased", now "locked")
-- Fixed Sonner Toaster not mounted (added <Sonner> to layout.tsx so toasts now appear)
-- Fixed clone-stamp missing from onPointerDown dependencies (added docWidth, docHeight, drawCloneStamp)
+- Verified auto theme detection: system preference dark → html.dark, light → html.light
+- Verified theme toggle: Light/Dark/System all work
+- Verified desktop layout: title bar, menu bar, toolbar, canvas, right panels all visible
+- Verified mobile layout (390x844): hamburger menu, floating panels button, touch-friendly controls
+- Verified Vector menu: all 4 options work (Vectorize Image, Quick Vectorize, Export SVG, Vectorize to New Layer)
+- Verified Vectorize dialog: opens, runs vectorization, shows preview, exports SVG, applies to layer
+- Verified SVG export: 25 paths, 7467 bytes, proper SVG with quadratic Bezier curves and colors
+- Verified Ctrl+Shift+V shortcut opens vectorize dialog
+- Verified mobile menu sheet: all menus accessible (File, Edit, Image, Layer, Filter, Vector, View)
+- Verified mobile panels sheet: all 4 tabs (Layers, Adjust, Color, History) accessible
+- Verified dark mode rendering: mean RGB ~46 (dark) vs ~252 (light)
+- Verified light mode rendering: all panels readable, proper contrast
 
 Stage Summary:
-- All planned features implemented and tested working
+- Vectorization fully working: images → SVG paths with configurable colors/smoothing/detail
+- SVG export downloads proper .svg files
+- Vectorized result can be added as new layer or replace current layer
+- App is fully responsive: mobile (390px) to desktop (1280px+)
+- Auto light/dark mode detection via next-themes system preference
+- Manual theme toggle (Light/Dark/System) in title bar
+- All editor components theme-aware
 - Lint passes with 0 errors, 0 warnings
 - Dev server returns 200 on all requests
-- No runtime errors after fresh reload
-- All keyboard shortcuts functional
-- All menu items functional
-- All panel features functional
-- Auto Unblur produces visible deblurring effect (mean pixel diff 32, max 175 on test image)
-- Auto Background Remove produces transparent corners (verified by hiding background layer)
-- Clone Stamp tool Alt+Click workflow functional
-- Toast notifications work properly via Sonner

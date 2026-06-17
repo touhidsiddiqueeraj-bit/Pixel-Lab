@@ -127,8 +127,8 @@ export function AdjustmentsPanel() {
   ];
 
   return (
-    <div className="flex flex-col h-full bg-zinc-900 text-zinc-200 overflow-y-auto custom-scroll">
-      <div className="px-3 py-2 border-b border-zinc-800 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+    <div className="flex flex-col h-full editor-surface editor-text overflow-y-auto custom-scroll">
+      <div className="px-3 py-2 border-b editor-border text-xs font-semibold uppercase tracking-wide editor-text-muted">
         Adjustments & Filters
       </div>
 
@@ -142,18 +142,18 @@ export function AdjustmentsPanel() {
           </div>
           <div className="space-y-1.5">
             <div className="flex items-center justify-between text-xs">
-              <Label className="text-zinc-400">Strength</Label>
-              <span className="text-zinc-300">{unblurStrength}</span>
+              <Label className="editor-text-muted">Strength</Label>
+              <span className="editor-text">{unblurStrength}</span>
             </div>
             <Slider value={[unblurStrength]} min={0} max={100} step={1} onValueChange={(v) => setUnblurStrength(v[0])} />
             <div className="flex items-center justify-between text-xs">
-              <Label className="text-zinc-400">Radius</Label>
-              <span className="text-zinc-300">{unblurRadius.toFixed(1)}px</span>
+              <Label className="editor-text-muted">Radius</Label>
+              <span className="editor-text">{unblurRadius.toFixed(1)}px</span>
             </div>
             <Slider value={[unblurRadius * 10]} min={1} max={50} step={1} onValueChange={(v) => setUnblurRadius(v[0] / 10)} />
             <div className="flex items-center justify-between text-xs">
-              <Label className="text-zinc-400">Threshold</Label>
-              <span className="text-zinc-300">{unblurThreshold}</span>
+              <Label className="editor-text-muted">Threshold</Label>
+              <span className="editor-text">{unblurThreshold}</span>
             </div>
             <Slider value={[unblurThreshold]} min={0} max={30} step={1} onValueChange={(v) => setUnblurThreshold(v[0])} />
             <Button
@@ -162,7 +162,7 @@ export function AdjustmentsPanel() {
             >
               <Zap size={12} className="mr-1" /> Unblur Image
             </Button>
-            <p className="text-[10px] text-zinc-500 leading-snug">
+            <p className="text-[10px] editor-text-dim leading-snug">
               Uses unsharp masking + Sobel edge enhancement to restore sharpness. Best for slightly blurred photos.
             </p>
           </div>
@@ -170,40 +170,40 @@ export function AdjustmentsPanel() {
 
         {/* Auto background removal */}
         <div className="space-y-2 p-3 rounded-lg bg-gradient-to-br from-sky-900/30 to-purple-900/30 border border-sky-700/40">
-          <div className="flex items-center gap-2 text-xs font-bold text-sky-400">
+          <div className="flex items-center gap-2 text-xs font-bold editor-accent">
             <Sparkles size={14} />
             <span>AI Auto Background Remove</span>
           </div>
           <div className="space-y-1.5">
             <div className="flex items-center justify-between text-xs">
-              <Label className="text-zinc-400 flex items-center gap-1"><Scissors size={11} /> Tolerance</Label>
-              <span className="text-zinc-300">{bgTolerance}</span>
+              <Label className="editor-text-muted flex items-center gap-1"><Scissors size={11} /> Tolerance</Label>
+              <span className="editor-text">{bgTolerance}</span>
             </div>
             <Slider value={[bgTolerance]} min={5} max={80} step={1} onValueChange={(v) => setBgTolerance(v[0])} />
             <Button
               onClick={handleAutoBgRemove}
-              className="w-full bg-sky-600 hover:bg-sky-500 text-white text-xs h-8"
+              className="w-full editor-accent-bg hover:editor-accent-bg text-white text-xs h-8"
             >
               <Wand2 size={12} className="mr-1" /> Remove Background
             </Button>
-            <p className="text-[10px] text-zinc-500 leading-snug">
+            <p className="text-[10px] editor-text-dim leading-snug">
               Smart edge-detection flood-fill. Best for images with solid or gradient backgrounds.
             </p>
           </div>
         </div>
 
-        <div className="h-px bg-zinc-800" />
+        <div className="h-px editor-surface-2" />
 
         {/* Brightness/Contrast */}
         <div className="space-y-2">
-          <div className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+          <div className="text-xs font-semibold editor-text flex items-center gap-1.5">
             <SunMedium size={12} /> Brightness
-            <span className="ml-auto text-zinc-500">{brightness}</span>
+            <span className="ml-auto editor-text-dim">{brightness}</span>
           </div>
           <Slider value={[brightness]} min={-100} max={100} step={1} onValueChange={setBrightness} />
-          <div className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+          <div className="text-xs font-semibold editor-text flex items-center gap-1.5">
             <Contrast size={12} /> Contrast
-            <span className="ml-auto text-zinc-500">{contrast}</span>
+            <span className="ml-auto editor-text-dim">{contrast}</span>
           </div>
           <Slider value={[contrast]} min={-100} max={100} step={1} onValueChange={setContrast} />
           <Button
@@ -214,18 +214,18 @@ export function AdjustmentsPanel() {
           >Apply</Button>
         </div>
 
-        <div className="h-px bg-zinc-800" />
+        <div className="h-px editor-surface-2" />
 
         {/* Hue/Saturation */}
         <div className="space-y-2">
-          <div className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+          <div className="text-xs font-semibold editor-text flex items-center gap-1.5">
             <Palette size={12} /> Hue
-            <span className="ml-auto text-zinc-500">{hue}°</span>
+            <span className="ml-auto editor-text-dim">{hue}°</span>
           </div>
           <Slider value={[hue]} min={-180} max={180} step={1} onValueChange={setHue} />
-          <div className="text-xs font-semibold text-zinc-300">Saturation <span className="ml-auto text-zinc-500">{saturation}</span></div>
+          <div className="text-xs font-semibold editor-text">Saturation <span className="ml-auto editor-text-dim">{saturation}</span></div>
           <Slider value={[saturation]} min={-100} max={100} step={1} onValueChange={setSaturation} />
-          <div className="text-xs font-semibold text-zinc-300">Lightness <span className="ml-auto text-zinc-500">{lightness}</span></div>
+          <div className="text-xs font-semibold editor-text">Lightness <span className="ml-auto editor-text-dim">{lightness}</span></div>
           <Slider value={[lightness]} min={-100} max={100} step={1} onValueChange={setLightness} />
           <Button
             onClick={() => applyAdjustment('Hue/Saturation', (ctx, w, h) => applyHueSaturation(ctx, w, h, hue, saturation, lightness))}
@@ -235,13 +235,13 @@ export function AdjustmentsPanel() {
           >Apply</Button>
         </div>
 
-        <div className="h-px bg-zinc-800" />
+        <div className="h-px editor-surface-2" />
 
         {/* Color Temperature */}
         <div className="space-y-2">
-          <div className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+          <div className="text-xs font-semibold editor-text flex items-center gap-1.5">
             <Thermometer size={12} /> Color Temperature
-            <span className="ml-auto text-zinc-500">{temperature > 0 ? `+${temperature}` : temperature}</span>
+            <span className="ml-auto editor-text-dim">{temperature > 0 ? `+${temperature}` : temperature}</span>
           </div>
           <Slider value={[temperature]} min={-100} max={100} step={1} onValueChange={setTemperature} />
           <Button
@@ -252,13 +252,13 @@ export function AdjustmentsPanel() {
           >Apply Temperature</Button>
         </div>
 
-        <div className="h-px bg-zinc-800" />
+        <div className="h-px editor-surface-2" />
 
         {/* Blur & Sharpen */}
         <div className="space-y-2">
-          <div className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+          <div className="text-xs font-semibold editor-text flex items-center gap-1.5">
             <Droplets size={12} /> Gaussian Blur
-            <span className="ml-auto text-zinc-500">{blurRadius}px</span>
+            <span className="ml-auto editor-text-dim">{blurRadius}px</span>
           </div>
           <Slider value={[blurRadius]} min={0} max={30} step={0.5} onValueChange={setBlurRadius} />
           <Button
@@ -271,9 +271,9 @@ export function AdjustmentsPanel() {
         </div>
 
         <div className="space-y-2">
-          <div className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+          <div className="text-xs font-semibold editor-text flex items-center gap-1.5">
             <Focus size={12} /> Sharpen
-            <span className="ml-auto text-zinc-500">{sharpenAmount.toFixed(1)}</span>
+            <span className="ml-auto editor-text-dim">{sharpenAmount.toFixed(1)}</span>
           </div>
           <Slider value={[sharpenAmount * 10]} min={0} max={50} step={1} onValueChange={(v) => setSharpenAmount(v[0] / 10)} />
           <Button
@@ -285,16 +285,16 @@ export function AdjustmentsPanel() {
           >Apply Sharpen</Button>
         </div>
 
-        <div className="h-px bg-zinc-800" />
+        <div className="h-px editor-surface-2" />
 
         {/* Vignette */}
         <div className="space-y-2">
-          <div className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+          <div className="text-xs font-semibold editor-text flex items-center gap-1.5">
             <Aperture size={12} /> Vignette
-            <span className="ml-auto text-zinc-500">{vignetteAmount}</span>
+            <span className="ml-auto editor-text-dim">{vignetteAmount}</span>
           </div>
           <Slider value={[vignetteAmount]} min={0} max={100} step={1} onValueChange={setVignetteAmount} />
-          <div className="text-xs text-zinc-400">Size <span className="ml-auto text-zinc-500">{vignetteSize}</span></div>
+          <div className="text-xs editor-text-muted">Size <span className="ml-auto editor-text-dim">{vignetteSize}</span></div>
           <Slider value={[vignetteSize]} min={0} max={100} step={1} onValueChange={setVignetteSize} />
           <Button
             onClick={() => applyAdjustment('Vignette', (ctx, w, h) => applyVignette(ctx, w, h, vignetteAmount, vignetteSize))}
@@ -305,13 +305,13 @@ export function AdjustmentsPanel() {
           >Apply Vignette</Button>
         </div>
 
-        <div className="h-px bg-zinc-800" />
+        <div className="h-px editor-surface-2" />
 
         {/* Noise */}
         <div className="space-y-2">
-          <div className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+          <div className="text-xs font-semibold editor-text flex items-center gap-1.5">
             <AudioWaveform size={12} /> Add Noise (Grain)
-            <span className="ml-auto text-zinc-500">{noiseAmount}</span>
+            <span className="ml-auto editor-text-dim">{noiseAmount}</span>
           </div>
           <Slider value={[noiseAmount]} min={0} max={100} step={1} onValueChange={setNoiseAmount} />
           <Button
@@ -321,7 +321,7 @@ export function AdjustmentsPanel() {
             className="w-full h-7 text-xs"
             disabled={noiseAmount <= 0}
           >Add Noise</Button>
-          <div className="text-xs text-zinc-400 mt-2">Denoise Radius <span className="ml-auto text-zinc-500">{denoiseRadius}</span></div>
+          <div className="text-xs editor-text-muted mt-2">Denoise Radius <span className="ml-auto editor-text-dim">{denoiseRadius}</span></div>
           <Slider value={[denoiseRadius]} min={1} max={3} step={1} onValueChange={setDenoiseRadius} />
           <Button
             onClick={() => applyAdjustment('Denoise', (ctx, w, h) => medianDenoise(ctx, w, h, denoiseRadius))}
@@ -331,13 +331,13 @@ export function AdjustmentsPanel() {
           >Denoise (Median)</Button>
         </div>
 
-        <div className="h-px bg-zinc-800" />
+        <div className="h-px editor-surface-2" />
 
         {/* Pixelate & Posterize */}
         <div className="space-y-2">
-          <div className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+          <div className="text-xs font-semibold editor-text flex items-center gap-1.5">
             <Grid3x3 size={12} /> Pixelate
-            <span className="ml-auto text-zinc-500">{pixelateSize}px</span>
+            <span className="ml-auto editor-text-dim">{pixelateSize}px</span>
           </div>
           <Slider value={[pixelateSize]} min={2} max={50} step={1} onValueChange={setPixelateSize} />
           <Button
@@ -346,7 +346,7 @@ export function AdjustmentsPanel() {
             size="sm"
             className="w-full h-7 text-xs"
           >Apply Pixelate</Button>
-          <div className="text-xs text-zinc-400 mt-2">Posterize Levels <span className="ml-auto text-zinc-500">{posterizeLevels}</span></div>
+          <div className="text-xs editor-text-muted mt-2">Posterize Levels <span className="ml-auto editor-text-dim">{posterizeLevels}</span></div>
           <Slider value={[posterizeLevels]} min={2} max={32} step={1} onValueChange={setPosterizeLevels} />
           <Button
             onClick={() => applyAdjustment('Posterize', (ctx, w, h) => applyPosterize(ctx, w, h, posterizeLevels))}
@@ -356,17 +356,17 @@ export function AdjustmentsPanel() {
           >Apply Posterize</Button>
         </div>
 
-        <div className="h-px bg-zinc-800" />
+        <div className="h-px editor-surface-2" />
 
         {/* Quick filters */}
         <div className="space-y-2">
-          <div className="text-xs font-semibold text-zinc-300">Quick Filters</div>
+          <div className="text-xs font-semibold editor-text">Quick Filters</div>
           <div className="grid grid-cols-3 gap-1.5">
             {quickFilters.map((f) => (
               <button
                 key={f.label}
                 onClick={f.action}
-                className="flex flex-col items-center gap-1 p-2 rounded border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 hover:border-sky-500 transition-colors"
+                className="flex flex-col items-center gap-1 p-2 rounded border editor-border editor-surface-2 hover:editor-surface-3 hover:editor-accent transition-colors"
               >
                 {f.icon}
                 <span className="text-[10px]">{f.label}</span>

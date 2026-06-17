@@ -46,14 +46,14 @@ export function LayersPanel() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-zinc-900 text-zinc-200">
-      <div className="px-3 py-2 border-b border-zinc-800 text-xs font-semibold uppercase tracking-wide text-zinc-400 flex items-center justify-between">
+    <div className="flex flex-col h-full editor-surface editor-text">
+      <div className="px-3 py-2 border-b editor-border text-xs font-semibold uppercase tracking-wide editor-text-muted flex items-center justify-between">
         <span>Layers</span>
-        <span className="text-zinc-600 normal-case">{layers.length}</span>
+        <span className="editor-text-dim normal-case">{layers.length}</span>
       </div>
 
       {/* Blend mode & opacity controls */}
-      <div className="p-2 border-b border-zinc-800 space-y-2">
+      <div className="p-2 border-b editor-border space-y-2">
         <div className="flex items-center gap-2">
           <Select
             value={layers.find((l) => l.id === activeLayerId)?.blendMode ?? 'source-over'}
@@ -65,12 +65,12 @@ export function LayersPanel() {
             }}
             disabled={!activeLayerId}
           >
-            <SelectTrigger className="h-7 bg-zinc-800 border-zinc-700 text-xs">
+            <SelectTrigger className="h-7 editor-surface-2 editor-border text-xs">
               <SelectValue placeholder="Blend Mode" />
             </SelectTrigger>
-            <SelectContent className="bg-zinc-900 border-zinc-700 max-h-72">
+            <SelectContent className="editor-surface editor-border max-h-72">
               {BLEND_MODES.map((m) => (
-                <SelectItem key={m.value} value={m.value} className="hover:bg-sky-600 hover:text-white text-xs">
+                <SelectItem key={m.value} value={m.value} className="hover:editor-accent-bg hover:text-white text-xs">
                   {m.label}
                 </SelectItem>
               ))}
@@ -78,7 +78,7 @@ export function LayersPanel() {
           </Select>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-zinc-400 w-12">Opacity</span>
+          <span className="text-xs editor-text-muted w-12">Opacity</span>
           <Slider
             value={[Math.round((layers.find((l) => l.id === activeLayerId)?.opacity ?? 1) * 100)]}
             min={0}
@@ -115,8 +115,8 @@ export function LayersPanel() {
               }}
               onClick={() => setActiveLayer(layer.id)}
               className={cn(
-                'flex items-center gap-2 px-2 py-1.5 border-b border-zinc-800/50 cursor-pointer transition-colors group',
-                isActive ? 'bg-sky-600/20 border-l-2 border-l-sky-500' : 'hover:bg-zinc-800/50',
+                'flex items-center gap-2 px-2 py-1.5 border-b editor-border/50 cursor-pointer transition-colors group',
+                isActive ? 'editor-accent-bg/20 border-l-2 border-l-[var(--editor-accent)]' : 'hover:editor-surface-2/50',
               )}
             >
               <button
@@ -124,17 +124,17 @@ export function LayersPanel() {
                   e.stopPropagation();
                   updateLayer(layer.id, { visible: !layer.visible });
                 }}
-                className="text-zinc-400 hover:text-white shrink-0"
+                className="editor-text-muted hover:text-white shrink-0"
                 title={layer.visible ? 'Hide layer' : 'Show layer'}
               >
-                {layer.visible ? <Eye size={14} /> : <EyeOff size={14} className="text-zinc-600" />}
+                {layer.visible ? <Eye size={14} /> : <EyeOff size={14} className="editor-text-dim" />}
               </button>
 
-              <div className="w-10 h-10 rounded border border-zinc-700 bg-zinc-800 shrink-0 overflow-hidden flex items-center justify-center checkerboard">
+              <div className="w-10 h-10 rounded border editor-border editor-surface-2 shrink-0 overflow-hidden flex items-center justify-center checkerboard">
                 {layer.thumbnail ? (
                   <img src={layer.thumbnail} alt="" className="w-full h-full object-contain" />
                 ) : (
-                  <ImageIcon size={12} className="text-zinc-600" />
+                  <ImageIcon size={12} className="editor-text-dim" />
                 )}
               </div>
 
@@ -150,7 +150,7 @@ export function LayersPanel() {
                       if (e.key === 'Escape') setEditingId(null);
                     }}
                     onClick={(e) => e.stopPropagation()}
-                    className="w-full bg-zinc-800 border border-sky-500 px-1 py-0.5 rounded text-xs text-white outline-none"
+                    className="w-full editor-surface-2 border border-[var(--editor-accent)] px-1 py-0.5 rounded text-xs text-white outline-none"
                   />
                 ) : (
                   <div
@@ -159,12 +159,12 @@ export function LayersPanel() {
                       setEditingId(layer.id);
                       setEditingName(layer.name);
                     }}
-                    className="text-xs truncate text-zinc-100"
+                    className="text-xs truncate editor-text"
                   >
                     {layer.name}
                   </div>
                 )}
-                <div className="text-[10px] text-zinc-500">
+                <div className="text-[10px] editor-text-dim">
                   {Math.round(layer.opacity * 100)}% · {BLEND_MODES.find((m) => m.value === layer.blendMode)?.label ?? 'Normal'}
                 </div>
               </div>
@@ -176,7 +176,7 @@ export function LayersPanel() {
                 }}
                 className={cn(
                   'shrink-0',
-                  layer.locked ? 'text-amber-400' : 'text-zinc-600 opacity-0 group-hover:opacity-100 hover:text-white',
+                  layer.locked ? 'text-amber-400' : 'editor-text-dim opacity-0 group-hover:opacity-100 hover:text-white',
                 )}
                 title={layer.locked ? 'Unlock layer' : 'Lock layer'}
               >
@@ -189,12 +189,12 @@ export function LayersPanel() {
 
       {/* Footer actions */}
       <TooltipProvider delayDuration={400}>
-        <div className="flex items-center gap-1 px-2 py-1.5 border-t border-zinc-800 bg-zinc-900">
+        <div className="flex items-center gap-1 px-2 py-1.5 border-t editor-border editor-surface">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 onClick={() => { addLayer(); pushHistory('New Layer'); }}
-                className="p-1.5 rounded hover:bg-zinc-800 text-zinc-300"
+                className="p-1.5 rounded hover:editor-surface-2 editor-text"
               >
                 <Plus size={16} />
               </button>
@@ -207,7 +207,7 @@ export function LayersPanel() {
               <button
                 onClick={() => activeLayerId && duplicateLayer(activeLayerId)}
                 disabled={!activeLayerId}
-                className="p-1.5 rounded hover:bg-zinc-800 text-zinc-300 disabled:opacity-40"
+                className="p-1.5 rounded hover:editor-surface-2 editor-text disabled:opacity-40"
               >
                 <Copy size={16} />
               </button>
@@ -220,7 +220,7 @@ export function LayersPanel() {
               <button
                 onClick={() => activeLayerId && mergeDown(activeLayerId)}
                 disabled={activeIdx <= 0}
-                className="p-1.5 rounded hover:bg-zinc-800 text-zinc-300 disabled:opacity-40"
+                className="p-1.5 rounded hover:editor-surface-2 editor-text disabled:opacity-40"
               >
                 <ChevronsDown size={16} />
               </button>
@@ -235,7 +235,7 @@ export function LayersPanel() {
               <button
                 onClick={() => activeLayerId && deleteLayer(activeLayerId)}
                 disabled={layers.length <= 1 || !activeLayerId}
-                className="p-1.5 rounded hover:bg-red-600 hover:text-white text-zinc-300 disabled:opacity-40"
+                className="p-1.5 rounded hover:bg-red-600 hover:text-white editor-text disabled:opacity-40"
               >
                 <Trash2 size={16} />
               </button>

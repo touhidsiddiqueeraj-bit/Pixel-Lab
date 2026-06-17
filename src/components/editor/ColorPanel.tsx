@@ -81,8 +81,8 @@ export function ColorPanel() {
   const svY = 1 - v / 100;
 
   return (
-    <div className="flex flex-col h-full bg-zinc-900 text-zinc-200">
-      <div className="px-3 py-2 border-b border-zinc-800 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+    <div className="flex flex-col h-full editor-surface editor-text">
+      <div className="px-3 py-2 border-b editor-border text-xs font-semibold uppercase tracking-wide editor-text-muted">
         Color
       </div>
 
@@ -92,13 +92,13 @@ export function ColorPanel() {
           <div className="relative w-20 h-14">
             <button
               onClick={() => setEditingTarget('fg')}
-              className={`absolute top-0 left-0 w-12 h-12 rounded border-2 shadow-md ${editingTarget === 'fg' ? 'border-sky-500' : 'border-zinc-600'}`}
+              className={`absolute top-0 left-0 w-12 h-12 rounded border-2 shadow-md ${editingTarget === 'fg' ? 'border-[var(--editor-accent)]' : 'editor-border'}`}
               style={{ backgroundColor: foreground }}
               title="Foreground"
             />
             <button
               onClick={() => setEditingTarget('bg')}
-              className={`absolute bottom-0 right-0 w-12 h-12 rounded border-2 shadow-md ${editingTarget === 'bg' ? 'border-sky-500' : 'border-zinc-600'}`}
+              className={`absolute bottom-0 right-0 w-12 h-12 rounded border-2 shadow-md ${editingTarget === 'bg' ? 'border-[var(--editor-accent)]' : 'editor-border'}`}
               style={{ backgroundColor: background }}
               title="Background"
             />
@@ -106,14 +106,14 @@ export function ColorPanel() {
           <div className="flex flex-col gap-1">
             <button
               onClick={swapColors}
-              className="p-1.5 rounded hover:bg-zinc-800 text-zinc-300"
+              className="p-1.5 rounded hover:editor-surface-2 editor-text"
               title="Swap colors (X)"
             >
               <ArrowLeftRight size={14} />
             </button>
             <button
               onClick={resetColors}
-              className="p-1.5 rounded hover:bg-zinc-800 text-zinc-300"
+              className="p-1.5 rounded hover:editor-surface-2 editor-text"
               title="Reset colors (D)"
             >
               <RefreshCw size={14} />
@@ -162,7 +162,7 @@ export function ColorPanel() {
           }}
         >
           <div
-            className="absolute w-1.5 h-full bg-white border border-zinc-700 shadow pointer-events-none"
+            className="absolute w-1.5 h-full bg-white border editor-border shadow pointer-events-none"
             style={{
               left: `${(h / 360) * 100}%`,
               transform: 'translateX(-50%)',
@@ -172,7 +172,7 @@ export function ColorPanel() {
 
         {/* Hex input */}
         <div className="flex items-center gap-2">
-          <span className="text-xs text-zinc-400 w-8">Hex</span>
+          <span className="text-xs editor-text-muted w-8">Hex</span>
           <input
             type="text"
             value={hexInput}
@@ -188,10 +188,10 @@ export function ColorPanel() {
                 setHexInput(currentColor);
               }
             }}
-            className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs font-mono"
+            className="flex-1 editor-surface-2 border editor-border rounded px-2 py-1 text-xs font-mono"
           />
           <label className="relative cursor-pointer">
-            <Pipette size={14} className="text-zinc-400" />
+            <Pipette size={14} className="editor-text-muted" />
             <input
               type="color"
               value={currentColor}
@@ -205,7 +205,7 @@ export function ColorPanel() {
         <div className="grid grid-cols-3 gap-2">
           {(['r', 'g', 'b'] as const).map((ch) => (
             <div key={ch} className="flex flex-col items-center">
-              <span className="text-[10px] text-zinc-500 uppercase">{ch}</span>
+              <span className="text-[10px] editor-text-dim uppercase">{ch}</span>
               <input
                 type="number"
                 min={0}
@@ -216,7 +216,7 @@ export function ColorPanel() {
                   const newRgb = { ...rgb, [ch]: v };
                   updateFromRgb(newRgb.r, newRgb.g, newRgb.b);
                 }}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded px-1 py-0.5 text-xs text-center"
+                className="w-full editor-surface-2 border editor-border rounded px-1 py-0.5 text-xs text-center"
               />
             </div>
           ))}
@@ -224,7 +224,7 @@ export function ColorPanel() {
       </div>
 
       {/* Swatches */}
-      <div className="px-3 py-2 border-t border-zinc-800 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+      <div className="px-3 py-2 border-t editor-border text-xs font-semibold uppercase tracking-wide editor-text-muted">
         Swatches
       </div>
       <div className="p-2 grid grid-cols-5 gap-1 overflow-y-auto custom-scroll">
@@ -232,7 +232,7 @@ export function ColorPanel() {
           <button
             key={c}
             onClick={() => setCurrentColor(c)}
-            className="w-full aspect-square rounded border border-zinc-700 hover:border-sky-500 transition-colors"
+            className="w-full aspect-square rounded border editor-border hover:editor-accent transition-colors"
             style={{ backgroundColor: c }}
             title={c}
           />
