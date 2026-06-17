@@ -1138,10 +1138,10 @@ export function EditorCanvas() {
   ]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
+    const pt = toCanvasCoords(e.clientX, e.clientY);
     // Only update cursor position display when not actively drawing
     // (during drawing, the cursor display is not needed and causes re-renders)
     if (!drawingRef.current) {
-      const pt = toCanvasCoords(e.clientX, e.clientY);
       setCursorPos(pt);
     }
 
