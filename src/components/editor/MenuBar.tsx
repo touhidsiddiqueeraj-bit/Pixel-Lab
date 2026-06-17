@@ -926,6 +926,13 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
             <MenubarItem className={itemClass} onClick={() => store.clearGuides()}>
               <span>Clear Guides</span><span></span>
             </MenubarItem>
+            <MenubarSeparator className="editor-border" />
+            <MenubarItem className={itemClass} onClick={() => {
+              try { localStorage.removeItem('pixel-lab-onboarding-completed'); } catch {}
+              window.dispatchEvent(new CustomEvent('reopen-onboarding'));
+            }}>
+              <span>Show Onboarding Tour...</span><span></span>
+            </MenubarItem>
           </MenubarContent>
         </MenubarMenu>
       </Menubar>

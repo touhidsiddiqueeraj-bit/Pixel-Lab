@@ -44,6 +44,8 @@ export function EditorCanvas() {
   const guides = useEditorStore((s) => s.guides);
   const snapToGuides = useEditorStore((s) => s.snapToGuides);
   const addGuide = useEditorStore((s) => s.addGuide);
+  const settingSource = useEditorStore((s) => s.settingSource);
+  const setSettingSource = useEditorStore((s) => s.setSettingSource);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const compositeCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -1044,8 +1046,8 @@ export function EditorCanvas() {
         toast.error('Layer is locked');
         return;
       }
-      // Alt+Click sets source
-      if (e.altKey) {
+      // Alt+Click or "Set Source" mode sets source
+      if (e.altKey || settingSource) {
         cloneSourceRef.current = pt;
         // Take a snapshot of the composite for sampling
         const composite = compositeCanvasRef.current;
@@ -1056,11 +1058,12 @@ export function EditorCanvas() {
           cloneSampleCanvasRef.current = snap;
         }
         toast.success(`Clone source set: ${Math.round(pt.x)}, ${Math.round(pt.y)}`);
+        setSettingSource(false);
         return;
       }
       // Otherwise paint
       if (!cloneSourceRef.current || !cloneSampleCanvasRef.current) {
-        toast.error('Alt+Click to set clone source first');
+        toast.error('Alt+Click or tap "Set Source" to set clone source first');
         return;
       }
       drawingRef.current = true;
@@ -1081,7 +1084,7 @@ export function EditorCanvas() {
         toast.error('Layer is locked');
         return;
       }
-      if (e.altKey) {
+      if (e.altKey || settingSource) {
         healSourceRef.current = pt;
         const composite = compositeCanvasRef.current;
         if (composite) {
@@ -1090,10 +1093,11 @@ export function EditorCanvas() {
           healSampleCanvasRef.current = snap;
         }
         toast.success(`Heal source set: ${Math.round(pt.x)}, ${Math.round(pt.y)}`);
+        setSettingSource(false);
         return;
       }
       if (!healSourceRef.current || !healSampleCanvasRef.current) {
-        toast.error('Alt+Click to set heal source first');
+        toast.error('Alt+Click or tap "Set Source" to set heal source first');
         return;
       }
       drawingRef.current = true;
@@ -1135,6 +1139,7 @@ export function EditorCanvas() {
     addText, clearStrokeCanvas, drawStrokeSegment, previewStroke,
     setSelection, createLassoMask, setForeground, getActiveLayer,
     docWidth, docHeight, drawCloneStamp, drawHealStroke, drawPenPath, applyLiquify,
+    settingSource, setSettingSource,
   ]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {

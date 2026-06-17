@@ -14,6 +14,7 @@ import { NewDocumentDialog } from './NewDocumentDialog';
 import { VectorizeDialog } from './VectorizeDialog';
 import { ThemeToggle } from './ThemeToggle';
 import { PerformanceControls } from './PerformanceControls';
+import { Onboarding } from './Onboarding';
 import { useEditorStore } from '@/lib/editor-store';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -231,6 +232,7 @@ export function PhotoEditor() {
 
       <NewDocumentDialog open={newDocOpen} onClose={() => setNewDocOpen(false)} />
       <VectorizeDialog open={vectorizeOpen} onClose={() => setVectorizeOpen(false)} />
+      <Onboarding />
     </div>
   );
 }

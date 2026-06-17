@@ -100,6 +100,10 @@ interface EditorState {
   editingMask: boolean;
   setEditingMask: (v: boolean) => void;
 
+  // Clone/Heal source setting mode (for mobile where Alt+Click isn't available)
+  settingSource: boolean;
+  setSettingSource: (v: boolean) => void;
+
   setSelection: (mask: HTMLCanvasElement | null, bounds: { x: number; y: number; w: number; h: number } | null) => void;
   clearSelection: () => void;
   selectAll: () => void;
@@ -160,6 +164,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   panY: 0,
 
   editingMask: false,
+
+  settingSource: false,
 
   guides: { x: [], y: [] },
   showRulers: false,
@@ -417,6 +423,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   })),
 
   setEditingMask: (v) => set({ editingMask: v }),
+  setSettingSource: (v) => set({ settingSource: v }),
 
   setSelection: (mask, bounds) => set({ selectionMask: mask, selectionBounds: bounds }),
   clearSelection: () => set({ selectionMask: null, selectionBounds: null }),

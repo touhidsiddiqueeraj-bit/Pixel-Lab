@@ -5,8 +5,11 @@ import { Slider } from '@/components/ui/slider';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Crosshair } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { TOOL_PRESETS } from './tool-presets';
+import { cn } from '@/lib/utils';
 
 const FONTS = [
   'Inter, sans-serif',
@@ -24,6 +27,8 @@ export function OptionsBar() {
   const opts = useEditorStore((s) => s.toolOptions);
   const setOpts = useEditorStore((s) => s.setToolOptions);
   const setZoom = useEditorStore((s) => s.setZoom);
+  const settingSource = useEditorStore((s) => s.settingSource);
+  const setSettingSource = useEditorStore((s) => s.setSettingSource);
   const zoom = useEditorStore((s) => s.zoom);
 
   const preset = TOOL_PRESETS[activeTool];
@@ -36,6 +41,27 @@ export function OptionsBar() {
       </div>
 
       <div className="w-px h-6 editor-border shrink-0" />
+
+      {/* Set Source button for Clone Stamp & Healing Brush (mobile-friendly) */}
+      {(activeTool === 'clone-stamp' || activeTool === 'heal-brush') && (
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            onClick={() => setSettingSource(!settingSource)}
+            className={cn(
+              'h-7 px-2 text-xs gap-1',
+              settingSource
+                ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                : 'editor-surface-2 editor-border editor-text hover:editor-surface-3',
+            )}
+            title="Click to set clone/heal source point"
+          >
+            <Crosshair size={12} />
+            <span className="hidden sm:inline">{settingSource ? 'Click canvas to set source...' : 'Set Source'}</span>
+            <span className="sm:hidden">{settingSource ? 'Set...' : 'Source'}</span>
+          </Button>
+          <span className="text-[10px] editor-text-dim hidden md:inline">or Alt+Click</span>
+        </div>
+      )}
 
       {/* Brush size */}
       {(activeTool === 'brush' || activeTool === 'pencil' || activeTool === 'eraser') && (
