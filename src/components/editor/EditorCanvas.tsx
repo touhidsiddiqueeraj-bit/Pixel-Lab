@@ -924,10 +924,12 @@ export function EditorCanvas() {
 
   // Mouse event handlers
   const onPointerDown = useCallback((e: React.PointerEvent) => {
+    // Always capture pointer so we keep getting move/up events even outside canvas
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+
     if (e.button === 1 || (e.button === 0 && (activeTool === 'hand' || spacePressed.current || (e.altKey && activeTool !== 'eyedropper' && activeTool !== 'zoom')))) {
       // Pan with middle mouse or hand tool
       panStartRef.current = { x: e.clientX, y: e.clientY, panX, panY };
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
       return;
     }
 
@@ -1676,13 +1678,17 @@ export function EditorCanvas() {
   useEffect(() => {
     if (hasAutoFitRef.current) return;
     if (containerSize.w < 50 || containerSize.h < 50 || docWidth === 0) return;
+    // Use smaller margin on mobile to maximize canvas area
+    const margin = containerSize.w < 500 ? 20 : 60;
     const fitZoom = Math.min(
-      (containerSize.w - 60) / docWidth,
-      (containerSize.h - 60) / docHeight,
-      1,
+      (containerSize.w - margin) / docWidth,
+      (containerSize.h - margin) / docHeight,
     );
-    if (fitZoom > 0) {
-      setZoom(fitZoom);
+    // On mobile, allow zooming in up to 2x to fill the screen
+    const maxZoom = containerSize.w < 500 ? 2 : 1;
+    const finalZoom = Math.max(0.05, Math.min(maxZoom, fitZoom));
+    if (finalZoom > 0) {
+      setZoom(finalZoom);
       hasAutoFitRef.current = true;
     }
   }, [containerSize.w, containerSize.h, docWidth, docHeight, setZoom]);
@@ -1712,7 +1718,7 @@ export function EditorCanvas() {
   return (
     <div
       ref={containerRef}
-      className="relative flex-1 overflow-hidden editor-canvas-bg"
+      className="relative flex-1 overflow-hidden editor-canvas-bg touch-none"
       onWheel={onWheel}
       style={{ cursor: cursorStyle() }}
     >
@@ -1738,12 +1744,12 @@ export function EditorCanvas() {
         />
         <canvas
           ref={compositeCanvasRef}
-          className="absolute inset-0"
+          className="absolute inset-0 touch-none"
           style={{ width: '100%', height: '100%' }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
-          onPointerLeave={onPointerUp}
+          onPointerCancel={onPointerUp}
         />
         <canvas
           ref={overlayCanvasRef}

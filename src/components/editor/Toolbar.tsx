@@ -130,7 +130,7 @@ export function Toolbar() {
   const resetColors = useEditorStore((s) => s.resetColors);
 
   return (
-    <div className="flex flex-col items-center gap-1 editor-surface border-r editor-border px-1 py-2 w-12 sm:w-12 overflow-y-auto custom-scroll shrink-0 no-select">
+    <div className="flex flex-col items-center gap-1 editor-surface border-r editor-border px-1 py-2 w-10 sm:w-12 overflow-y-auto custom-scroll shrink-0 no-select">
       <TooltipProvider delayDuration={300}>
         {TOOLS.map((section, si) => (
           <div key={si} className="flex flex-col items-center gap-1">
@@ -140,7 +140,7 @@ export function Toolbar() {
                   <button
                     onClick={() => setTool(tool.type)}
                     className={cn(
-                      'flex items-center justify-center w-9 h-9 rounded-md transition-colors touch-target',
+                      'flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-md transition-colors touch-target',
                       activeTool === tool.type
                         ? 'editor-accent-bg text-white shadow-inner'
                         : 'editor-text-muted hover:editor-surface-3 hover:editor-text',
