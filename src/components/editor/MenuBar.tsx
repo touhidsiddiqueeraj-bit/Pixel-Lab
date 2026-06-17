@@ -933,6 +933,12 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
             }}>
               <span>Show Onboarding Tour...</span><span></span>
             </MenubarItem>
+            <MenubarItem className={itemClass} onClick={() => {
+              useEditorStore.getState().startTutorial();
+              toast.success('Tutorial started! Follow the steps at the bottom of the screen.');
+            }}>
+              <span>Start Interactive Tutorial...</span><span></span>
+            </MenubarItem>
           </MenubarContent>
         </MenubarMenu>
       </Menubar>

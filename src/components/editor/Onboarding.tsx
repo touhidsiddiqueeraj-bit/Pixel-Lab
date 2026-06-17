@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
+import { useEditorStore } from '@/lib/editor-store';
 import {
   Dialog,
   DialogContent,
@@ -25,6 +26,7 @@ import {
   Smartphone,
   Sun,
   Gauge,
+  GraduationCap,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -244,6 +246,22 @@ export function Onboarding() {
               >
                 Skip tour
               </Button>
+              {isLast && (
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    handleClose();
+                    // Start tutorial after onboarding closes
+                    setTimeout(() => {
+                      useEditorStore.getState().startTutorial();
+                    }, 500);
+                  }}
+                  className="bg-purple-600 hover:bg-purple-500 text-white text-xs"
+                  size="sm"
+                >
+                  <GraduationCap size={14} className="mr-1" /> Try Tutorial
+                </Button>
+              )}
               <Button
                 onClick={handleNext}
                 className="bg-sky-600 hover:bg-sky-500 text-white"

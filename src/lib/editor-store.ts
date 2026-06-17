@@ -147,6 +147,14 @@ interface EditorState {
   // Performance
   perfSettings: PerfSettings;
   setPerfSettings: (settings: Partial<PerfSettings>) => void;
+
+  // Tutorial
+  tutorialActive: boolean;
+  tutorialStep: number;
+  setTutorialActive: (v: boolean) => void;
+  setTutorialStep: (v: number) => void;
+  startTutorial: () => void;
+  endTutorial: () => void;
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -643,6 +651,91 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // Performance settings
   perfSettings: DEFAULT_PERF_SETTINGS,
   setPerfSettings: (settings) => set((s) => ({ perfSettings: { ...s.perfSettings, ...settings } })),
+
+  // Tutorial
+  tutorialActive: false,
+  tutorialStep: 0,
+  setTutorialActive: (v) => set({ tutorialActive: v }),
+  setTutorialStep: (v) => set({ tutorialStep: v }),
+  startTutorial: () => {
+    set({ tutorialActive: true, tutorialStep: 0 });
+    // Load a sample tutorial image
+    const w = 1024, h = 768;
+    const canvas = createBlankCanvas(w, h);
+    const ctx = canvas.getContext('2d')!;
+    // Sky gradient
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, h * 0.6);
+    skyGrad.addColorStop(0, '#1e3a5f');
+    skyGrad.addColorStop(0.5, '#4a90d9');
+    skyGrad.addColorStop(1, '#f0a060');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, w, h * 0.6);
+    // Sun
+    const sunGrad = ctx.createRadialGradient(w * 0.7, h * 0.2, 10, w * 0.7, h * 0.2, 80);
+    sunGrad.addColorStop(0, '#fff8e0');
+    sunGrad.addColorStop(0.5, '#fde047');
+    sunGrad.addColorStop(1, 'rgba(253,224,71,0)');
+    ctx.fillStyle = sunGrad;
+    ctx.beginPath();
+    ctx.arc(w * 0.7, h * 0.2, 80, 0, Math.PI * 2);
+    ctx.fill();
+    // Mountains (back)
+    ctx.fillStyle = '#4a5568';
+    ctx.beginPath();
+    ctx.moveTo(0, h * 0.55);
+    ctx.lineTo(w * 0.2, h * 0.3);
+    ctx.lineTo(w * 0.4, h * 0.45);
+    ctx.lineTo(w * 0.6, h * 0.25);
+    ctx.lineTo(w * 0.8, h * 0.4);
+    ctx.lineTo(w, h * 0.35);
+    ctx.lineTo(w, h * 0.6);
+    ctx.lineTo(0, h * 0.6);
+    ctx.closePath();
+    ctx.fill();
+    // Mountains (front)
+    ctx.fillStyle = '#2d3748';
+    ctx.beginPath();
+    ctx.moveTo(0, h * 0.6);
+    ctx.lineTo(w * 0.15, h * 0.4);
+    ctx.lineTo(w * 0.35, h * 0.5);
+    ctx.lineTo(w * 0.55, h * 0.35);
+    ctx.lineTo(w * 0.75, h * 0.48);
+    ctx.lineTo(w, h * 0.42);
+    ctx.lineTo(w, h * 0.7);
+    ctx.lineTo(0, h * 0.7);
+    ctx.closePath();
+    ctx.fill();
+    // Ground
+    const groundGrad = ctx.createLinearGradient(0, h * 0.6, 0, h);
+    groundGrad.addColorStop(0, '#2d4a2d');
+    groundGrad.addColorStop(1, '#1a2e1a');
+    ctx.fillStyle = groundGrad;
+    ctx.fillRect(0, h * 0.6, w, h * 0.4);
+    // Trees
+    ctx.fillStyle = '#1a3a1a';
+    for (const [tx, ty] of [[100, 550], [200, 580], [850, 560], [950, 590]]) {
+      ctx.fillStyle = '#451a03';
+      ctx.fillRect(tx - 4, ty, 8, 50);
+      ctx.fillStyle = '#166534';
+      ctx.beginPath();
+      ctx.arc(tx, ty - 10, 30, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Create the document with this image
+    get().newDocument(w, h, '#ffffff');
+    setTimeout(() => {
+      const state = get();
+      const layerId = state.addLayer('Tutorial Photo');
+      const newState = get();
+      const layer = newState.layers.find((l) => l.id === layerId);
+      if (layer) {
+        const lctx = layer.canvas.getContext('2d')!;
+        lctx.drawImage(canvas, 0, 0);
+        newState.refreshThumbnail(layerId);
+      }
+    }, 100);
+  },
+  endTutorial: () => set({ tutorialActive: false, tutorialStep: 0 }),
 }));
 
 // Restore editor state from a history entry
