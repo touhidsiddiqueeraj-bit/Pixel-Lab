@@ -20,6 +20,12 @@ export type ToolType =
   | 'shape-ellipse'
   | 'shape-line'
   | 'clone-stamp'
+  | 'heal-brush'
+  | 'pen'
+  | 'liquify-push'
+  | 'liquify-pucker'
+  | 'liquify-bloat'
+  | 'liquify-twirl'
   | 'hand'
   | 'zoom';
 
@@ -51,6 +57,9 @@ export interface LayerData {
   // Offscreen canvas storing this layer's pixels (relative to document origin)
   canvas: HTMLCanvasElement;
   thumbnail: string; // data URL thumbnail for panel
+  // Layer mask (white = visible, black = hidden). Null = no mask.
+  maskCanvas: HTMLCanvasElement | null;
+  maskEnabled: boolean;
 }
 
 export interface Selection {
@@ -68,6 +77,23 @@ export interface HistoryEntry {
   activeLayerId: string | null;
 }
 
+export interface ToolOptions {
+  brushSize: number;
+  brushHardness: number; // 0-100
+  brushOpacity: number; // 0-100
+  brushSpacing: number; // 0-100, distance between stamps
+  brushStabilizer: number; // 0-100, stroke smoothing strength
+  tolerance: number; // 0-255 for magic wand & bucket
+  fontSize: number;
+  fontFamily: string;
+  shapeFilled: boolean;
+  shapeStrokeWidth: number;
+  zoomLevel: number;
+  liquifyStrength: number; // 0-100
+  symmetryMode: 'none' | 'horizontal' | 'vertical' | 'quad' | 'mandala';
+  symmetrySegments: number; // for mandala mode, 2-12
+}
+
 export interface LayerSnapshot {
   id: string;
   name: string;
@@ -76,18 +102,8 @@ export interface LayerSnapshot {
   blendMode: BlendMode;
   locked: boolean;
   dataUrl: string;
-}
-
-export interface ToolOptions {
-  brushSize: number;
-  brushHardness: number; // 0-100
-  brushOpacity: number; // 0-100
-  tolerance: number; // 0-255 for magic wand & bucket
-  fontSize: number;
-  fontFamily: string;
-  shapeFilled: boolean;
-  shapeStrokeWidth: number;
-  zoomLevel: number;
+  maskDataUrl: string | null;
+  maskEnabled: boolean;
 }
 
 export const BLEND_MODES: { value: BlendMode; label: string }[] = [

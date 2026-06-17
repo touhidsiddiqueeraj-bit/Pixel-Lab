@@ -11,12 +11,28 @@ import { useEditorStore } from '@/lib/editor-store';
 const PRESETS = [
   { label: 'Default 1280×720', w: 1280, h: 720 },
   { label: 'HD 1920×1080', w: 1920, h: 1080 },
+  { label: '4K UHD 3840×2160', w: 3840, h: 2160 },
   { label: 'Square 1080×1080', w: 1080, h: 1080 },
   { label: 'Instagram Post 1080×1080', w: 1080, h: 1080 },
   { label: 'Instagram Story 1080×1920', w: 1080, h: 1920 },
+  { label: 'Instagram Reel 1080×1920', w: 1080, h: 1920 },
+  { label: 'Facebook Cover 820×312', w: 820, h: 312 },
+  { label: 'Facebook Post 1200×630', w: 1200, h: 630 },
   { label: 'Twitter Header 1500×500', w: 1500, h: 500 },
+  { label: 'Twitter Post 1200×675', w: 1200, h: 675 },
+  { label: 'YouTube Thumbnail 1280×720', w: 1280, h: 720 },
+  { label: 'YouTube Banner 2560×1440', w: 2560, h: 1440 },
+  { label: 'LinkedIn Cover 1584×396', w: 1584, h: 396 },
   { label: 'A4 @ 300 DPI 2480×3508', w: 2480, h: 3508 },
+  { label: 'A3 @ 300 DPI 3508×4961', w: 3508, h: 4961 },
+  { label: 'US Letter @ 300 DPI 2550×3300', w: 2550, h: 3300 },
+  { label: 'Business Card 1050×600', w: 1050, h: 600 },
   { label: 'Web Banner 728×90', w: 728, h: 90 },
+  { label: 'Skyscraper Ad 160×600', w: 160, h: 600 },
+  { label: 'iPhone Screenshot 1170×2532', w: 1170, h: 2532 },
+  { label: 'Android Screenshot 1080×2400', w: 1080, h: 2400 },
+  { label: 'Icon 512×512', w: 512, h: 512 },
+  { label: 'Favicon 64×64', w: 64, h: 64 },
 ];
 
 const BACKGROUNDS = [

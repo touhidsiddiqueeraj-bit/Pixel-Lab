@@ -20,12 +20,17 @@ const DEFAULT_TOOL_OPTIONS: ToolOptions = {
   brushSize: 20,
   brushHardness: 80,
   brushOpacity: 100,
+  brushSpacing: 25,
+  brushStabilizer: 0,
   tolerance: 32,
   fontSize: 48,
   fontFamily: 'Inter, sans-serif',
   shapeFilled: true,
   shapeStrokeWidth: 2,
   zoomLevel: 1,
+  liquifyStrength: 50,
+  symmetryMode: 'none',
+  symmetrySegments: 6,
 };
 
 const MAX_HISTORY = 40;
@@ -81,11 +86,17 @@ interface EditorState {
   mergeVisible: () => void;
   flattenImage: () => void;
   setActiveLayer: (id: string) => void;
-  updateLayer: (id: string, patch: Partial<Omit<LayerData, 'id' | 'canvas' | 'thumbnail'>>) => void;
+  updateLayer: (id: string, patch: Partial<Omit<LayerData, 'id' | 'canvas' | 'thumbnail' | 'maskCanvas'>>) => void;
   renameLayer: (id: string, name: string) => void;
   reorderLayers: (fromIndex: number, toIndex: number) => void;
   refreshThumbnail: (id: string) => void;
   replaceLayerCanvas: (id: string, canvas: HTMLCanvasElement) => void;
+  addLayerMask: (id: string) => void;
+  removeLayerMask: (id: string) => void;
+  toggleLayerMask: (id: string) => void;
+  replaceLayerMask: (id: string, mask: HTMLCanvasElement) => void;
+  editingMask: boolean;
+  setEditingMask: (v: boolean) => void;
 
   setSelection: (mask: HTMLCanvasElement | null, bounds: { x: number; y: number; w: number; h: number } | null) => void;
   clearSelection: () => void;
@@ -94,6 +105,18 @@ interface EditorState {
   featherSelection: (radius: number) => void;
   expandSelection: (pixels: number) => void;
   contractSelection: (pixels: number) => void;
+
+  // Guides & rulers
+  guides: { x: number[]; y: number[] };
+  addGuide: (orientation: 'h' | 'v', pos: number) => void;
+  removeGuide: (orientation: 'h' | 'v', index: number) => void;
+  clearGuides: () => void;
+  showRulers: boolean;
+  toggleRulers: () => void;
+  snapToGuides: boolean;
+  toggleSnapToGuides: () => void;
+  showGrid: boolean;
+  toggleGrid: () => void;
 
   pushHistory: (label: string) => void;
   undo: () => void;
@@ -130,6 +153,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   panX: 0,
   panY: 0,
 
+  editingMask: false,
+
+  guides: { x: [], y: [] },
+  showRulers: false,
+  snapToGuides: true,
+  showGrid: false,
+
   newDocument: (w, h, bg) => {
     const bgCanvas = createBlankCanvas(w, h);
     const bgCtx = bgCanvas.getContext('2d')!;
@@ -144,6 +174,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       locked: false,
       canvas: bgCanvas,
       thumbnail: generateThumbnail(bgCanvas),
+      maskCanvas: null,
+      maskEnabled: true,
     };
     set({
       docWidth: w,
@@ -157,6 +189,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       panY: 0,
       selectionMask: null,
       selectionBounds: null,
+      editingMask: false,
+      guides: { x: [], y: [] },
     });
     // push initial state
     setTimeout(() => get().pushHistory('New Document'), 0);
@@ -182,10 +216,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       locked: false,
       canvas: newCanvas,
       thumbnail: generateThumbnail(newCanvas),
+      maskCanvas: null,
+      maskEnabled: true,
     };
     set({
       layers: [...state.layers, newLayer],
       activeLayerId: newLayer.id,
+      editingMask: false,
     });
     return newLayer.id;
   },
@@ -212,12 +249,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const newCanvas = createBlankCanvas(orig.canvas.width, orig.canvas.height);
       const ctx = newCanvas.getContext('2d')!;
       ctx.drawImage(orig.canvas, 0, 0);
+      let newMask: HTMLCanvasElement | null = null;
+      if (orig.maskCanvas) {
+        newMask = createBlankCanvas(orig.canvas.width, orig.canvas.height);
+        newMask.getContext('2d')!.drawImage(orig.maskCanvas, 0, 0);
+      }
       const newLayer: LayerData = {
         ...orig,
         id: generateId(),
         name: `${orig.name} copy`,
         canvas: newCanvas,
         thumbnail: generateThumbnail(newCanvas),
+        maskCanvas: newMask,
       };
       const newLayers = [...s.layers];
       newLayers.splice(idx + 1, 0, newLayer);
@@ -336,6 +379,39 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     layers: s.layers.map((l) => l.id === id ? { ...l, canvas, thumbnail: generateThumbnail(canvas) } : l),
   })),
 
+  addLayerMask: (id) => set((s) => {
+    const layer = s.layers.find((l) => l.id === id);
+    if (!layer || layer.maskCanvas) return s;
+    // If there's a selection, use it as the mask; otherwise white (all visible)
+    const mask = createBlankCanvas(s.docWidth, s.docHeight);
+    const mctx = mask.getContext('2d')!;
+    if (s.selectionMask) {
+      mctx.drawImage(s.selectionMask, 0, 0);
+    } else {
+      mctx.fillStyle = '#ffffff';
+      mctx.fillRect(0, 0, s.docWidth, s.docHeight);
+    }
+    return {
+      layers: s.layers.map((l) => l.id === id ? { ...l, maskCanvas: mask, maskEnabled: true } : l),
+      editingMask: true,
+    };
+  }),
+
+  removeLayerMask: (id) => set((s) => ({
+    layers: s.layers.map((l) => l.id === id ? { ...l, maskCanvas: null } : l),
+    editingMask: false,
+  })),
+
+  toggleLayerMask: (id) => set((s) => ({
+    layers: s.layers.map((l) => l.id === id && l.maskCanvas ? { ...l, maskEnabled: !l.maskEnabled } : l),
+  })),
+
+  replaceLayerMask: (id, mask) => set((s) => ({
+    layers: s.layers.map((l) => l.id === id ? { ...l, maskCanvas: mask } : l),
+  })),
+
+  setEditingMask: (v) => set({ editingMask: v }),
+
   setSelection: (mask, bounds) => set({ selectionMask: mask, selectionBounds: bounds }),
   clearSelection: () => set({ selectionMask: null, selectionBounds: null }),
   selectAll: () => {
@@ -449,6 +525,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         blendMode: l.blendMode,
         locked: l.locked,
         dataUrl: canvasToDataUrl(l.canvas),
+        maskDataUrl: l.maskCanvas ? canvasToDataUrl(l.maskCanvas) : null,
+        maskEnabled: l.maskEnabled,
       }));
       const entry: HistoryEntry = {
         id: generateId(),
@@ -491,6 +569,33 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   canUndo: () => get().historyIndex > 0,
   canRedo: () => get().historyIndex < get().history.length - 1,
 
+  // Guides
+  addGuide: (orientation, pos) => set((s) => {
+    if (orientation === 'h') {
+      // Avoid duplicates
+      if (s.guides.y.includes(pos)) return s;
+      return { guides: { x: s.guides.x, y: [...s.guides.y, pos].sort((a, b) => a - b) } };
+    } else {
+      if (s.guides.x.includes(pos)) return s;
+      return { guides: { x: [...s.guides.x, pos].sort((a, b) => a - b), y: s.guides.y } };
+    }
+  }),
+  removeGuide: (orientation, index) => set((s) => {
+    if (orientation === 'h') {
+      const newY = [...s.guides.y];
+      newY.splice(index, 1);
+      return { guides: { x: s.guides.x, y: newY } };
+    } else {
+      const newX = [...s.guides.x];
+      newX.splice(index, 1);
+      return { guides: { x: newX, y: s.guides.y } };
+    }
+  }),
+  clearGuides: () => set({ guides: { x: [], y: [] } }),
+  toggleRulers: () => set((s) => ({ showRulers: !s.showRulers })),
+  toggleSnapToGuides: () => set((s) => ({ snapToGuides: !s.snapToGuides })),
+  toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
+
   setZoom: (z) => set({ zoom: Math.max(0.05, Math.min(32, z)) }),
   setPan: (x, y) => set({ panX: x, panY: y }),
   setDocName: (name) => set({ docName: name }),
@@ -503,6 +608,11 @@ async function restoreFromHistory(entry: HistoryEntry) {
   for (const snap of entry.layers) {
     const canvas = createBlankCanvas(store.docWidth, store.docHeight);
     await loadIntoCanvas(canvas, snap.dataUrl);
+    let maskCanvas: HTMLCanvasElement | null = null;
+    if (snap.maskDataUrl) {
+      maskCanvas = createBlankCanvas(store.docWidth, store.docHeight);
+      await loadIntoCanvas(maskCanvas, snap.maskDataUrl);
+    }
     newLayers.push({
       id: snap.id,
       name: snap.name,
@@ -512,6 +622,8 @@ async function restoreFromHistory(entry: HistoryEntry) {
       locked: snap.locked,
       canvas,
       thumbnail: generateThumbnail(canvas),
+      maskCanvas,
+      maskEnabled: snap.maskEnabled,
     });
   }
   useEditorStore.setState({

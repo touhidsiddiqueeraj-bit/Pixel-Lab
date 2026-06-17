@@ -143,7 +143,7 @@ export function OptionsBar() {
       )}
 
       {/* Shape options */}
-      {(activeTool === 'shape-rect' || activeTool === 'shape-ellipse' || activeTool === 'shape-line') && (
+      {(activeTool === 'shape-rect' || activeTool === 'shape-ellipse' || activeTool === 'shape-line' || activeTool === 'pen') && (
         <>
           <div className="flex items-center gap-2 shrink-0">
             <Label className="editor-text-muted">Fill</Label>
@@ -160,6 +160,83 @@ export function OptionsBar() {
               className="w-16 sm:w-24"
             />
             <span className="w-8">{opts.shapeStrokeWidth}px</span>
+          </div>
+          {activeTool === 'pen' && (
+            <span className="editor-text-dim text-[10px] hidden sm:inline">Enter to commit · Esc to cancel</span>
+          )}
+        </>
+      )}
+
+      {/* Liquify options */}
+      {(activeTool === 'liquify-push' || activeTool === 'liquify-pucker' || activeTool === 'liquify-bloat' || activeTool === 'liquify-twirl') && (
+        <>
+          <div className="flex items-center gap-2 shrink-0">
+            <Label className="editor-text-muted w-12 sm:w-14">Size</Label>
+            <Slider
+              value={[opts.brushSize]}
+              min={4}
+              max={300}
+              step={1}
+              onValueChange={(v) => setOpts({ brushSize: v[0] })}
+              className="w-20 sm:w-28"
+            />
+            <span className="editor-text-dim">{opts.brushSize}px</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Label className="editor-text-muted w-12 sm:w-14">Strength</Label>
+            <Slider
+              value={[opts.liquifyStrength]}
+              min={1}
+              max={100}
+              step={1}
+              onValueChange={(v) => setOpts({ liquifyStrength: v[0] })}
+              className="w-16 sm:w-24"
+            />
+            <span className="w-8">{opts.liquifyStrength}</span>
+          </div>
+        </>
+      )}
+
+      {/* Brush stabilizer & symmetry (for brush/pencil/eraser) */}
+      {(activeTool === 'brush' || activeTool === 'pencil' || activeTool === 'eraser') && (
+        <>
+          <div className="flex items-center gap-2 shrink-0 hidden md:flex">
+            <Label className="editor-text-muted w-12 sm:w-14">Stabilize</Label>
+            <Slider
+              value={[opts.brushStabilizer]}
+              min={0}
+              max={100}
+              step={1}
+              onValueChange={(v) => setOpts({ brushStabilizer: v[0] })}
+              className="w-16 sm:w-24"
+            />
+            <span className="w-8">{opts.brushStabilizer}</span>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <Label className="editor-text-muted text-[10px]">Sym</Label>
+            <select
+              value={opts.symmetryMode}
+              onChange={(e) => setOpts({ symmetryMode: e.target.value as typeof opts.symmetryMode })}
+              className="h-7 px-1 editor-surface editor-border rounded text-xs editor-text"
+              title="Symmetry mode"
+            >
+              <option value="none">Off</option>
+              <option value="horizontal">H Mirror</option>
+              <option value="vertical">V Mirror</option>
+              <option value="quad">Quad</option>
+              <option value="mandala">Mandala</option>
+            </select>
+            {opts.symmetryMode === 'mandala' && (
+              <input
+                type="number"
+                value={opts.symmetrySegments}
+                min={2}
+                max={12}
+                onChange={(e) => setOpts({ symmetrySegments: Math.max(2, Math.min(12, parseInt(e.target.value) || 6)) })}
+                className="w-10 h-7 editor-surface editor-border rounded text-center text-xs editor-text"
+                title="Mandala segments"
+              />
+            )}
           </div>
         </>
       )}

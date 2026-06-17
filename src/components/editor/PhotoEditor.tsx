@@ -9,6 +9,7 @@ import { LayersPanel } from './LayersPanel';
 import { HistoryPanel } from './HistoryPanel';
 import { ColorPanel } from './ColorPanel';
 import { AdjustmentsPanel } from './AdjustmentsPanel';
+import { NavigatorPanel } from './NavigatorPanel';
 import { NewDocumentDialog } from './NewDocumentDialog';
 import { VectorizeDialog } from './VectorizeDialog';
 import { ThemeToggle } from './ThemeToggle';
@@ -21,11 +22,11 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
-import { Layers, History, Palette, SlidersHorizontal, Menu, PanelRight, Spline } from 'lucide-react';
+import { Layers, History, Palette, SlidersHorizontal, Menu, PanelRight, Spline, Compass } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-type PanelTab = 'layers' | 'adjust' | 'color' | 'history';
+type PanelTab = 'layers' | 'adjust' | 'color' | 'history' | 'nav';
 
 export function PhotoEditor() {
   const [newDocOpen, setNewDocOpen] = useState(false);
@@ -81,6 +82,12 @@ export function PhotoEditor() {
           <Palette size={12} /> <span className="hidden sm:inline">Color</span>
         </TabsTrigger>
         <TabsTrigger
+          value="nav"
+          className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs"
+        >
+          <Compass size={12} /> <span className="hidden sm:inline">Nav</span>
+        </TabsTrigger>
+        <TabsTrigger
           value="history"
           className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs"
         >
@@ -95,6 +102,9 @@ export function PhotoEditor() {
       </TabsContent>
       <TabsContent value="color" className="flex-1 min-h-0 m-0">
         <ColorPanel />
+      </TabsContent>
+      <TabsContent value="nav" className="flex-1 min-h-0 m-0">
+        <NavigatorPanel />
       </TabsContent>
       <TabsContent value="history" className="flex-1 min-h-0 m-0">
         <HistoryPanel />

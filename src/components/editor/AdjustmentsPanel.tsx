@@ -20,10 +20,14 @@ import {
   applyPixelate,
   applyPosterize,
   applyColorTemperature,
+  applyCurves,
+  applyLevels,
+  applyChannelMixer,
+  applyHDRToning,
 } from '@/lib/image-processing';
 import { toast } from 'sonner';
 import { useState, useCallback } from 'react';
-import { Sparkles, SunMedium, Contrast, Droplets, Palette, CircleOff, Image as ImageIcon, Focus, Scissors, Wand2, Zap, Wind, Aperture, Grid3x3, Layers as LayersIcon, Thermometer, AudioWaveform } from 'lucide-react';
+import { Sparkles, SunMedium, Contrast, Droplets, Palette, CircleOff, Image as ImageIcon, Focus, Scissors, Wand2, Zap, Wind, Aperture, Grid3x3, Layers as LayersIcon, Thermometer, AudioWaveform, LineChart, BarChart3, SplitSquareHorizontal, TrendingUp } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -57,6 +61,15 @@ export function AdjustmentsPanel() {
   const [pixelateSize, setPixelateSize] = useState(8);
   const [posterizeLevels, setPosterizeLevels] = useState(4);
   const [temperature, setTemperature] = useState(0);
+
+  // Pro color tools
+  const [levelsBlack, setLevelsBlack] = useState(0);
+  const [levelsWhite, setLevelsWhite] = useState(255);
+  const [levelsGamma, setLevelsGamma] = useState(1);
+  const [curvesMid, setCurvesMid] = useState(128);
+  const [hdrStrength, setHdrStrength] = useState(40);
+  const [hdrRadius, setHdrRadius] = useState(8);
+  const [channelMixR, setChannelMixR] = useState(100);
 
   const getActive = useCallback(() => layers.find((l) => l.id === activeLayerId) ?? null, [layers, activeLayerId]);
 
@@ -383,6 +396,112 @@ export function AdjustmentsPanel() {
             size="sm"
             className="w-full h-7 text-xs"
           >Apply Threshold...</Button>
+        </div>
+
+        <div className="h-px editor-border" />
+
+        {/* Pro Color Tools */}
+        <div className="space-y-3">
+          <div className="text-xs font-semibold editor-text flex items-center gap-1.5">
+            <LineChart size={12} /> Pro Color Tools
+          </div>
+
+          {/* Levels */}
+          <div className="space-y-2 p-2 rounded editor-surface-2">
+            <div className="text-xs font-semibold editor-text flex items-center gap-1.5">
+              <BarChart3 size={11} /> Levels
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <Label className="editor-text-muted">Black</Label>
+              <span className="editor-text">{levelsBlack}</span>
+            </div>
+            <Slider value={[levelsBlack]} min={0} max={254} step={1} onValueChange={setLevelsBlack} />
+            <div className="flex items-center justify-between text-xs">
+              <Label className="editor-text-muted">White</Label>
+              <span className="editor-text">{levelsWhite}</span>
+            </div>
+            <Slider value={[levelsWhite]} min={1} max={255} step={1} onValueChange={setLevelsWhite} />
+            <div className="flex items-center justify-between text-xs">
+              <Label className="editor-text-muted">Gamma</Label>
+              <span className="editor-text">{levelsGamma.toFixed(2)}</span>
+            </div>
+            <Slider value={[levelsGamma * 100]} min={10} max={1000} step={1} onValueChange={(v) => setLevelsGamma(v[0] / 100)} />
+            <Button
+              onClick={() => applyAdjustment('Levels', (ctx, w, h) => applyLevels(ctx, w, h, levelsBlack, levelsWhite, levelsGamma))}
+              variant="secondary"
+              size="sm"
+              className="w-full h-7 text-xs"
+            >Apply Levels</Button>
+          </div>
+
+          {/* Curves (simplified: S-curve with single mid-point) */}
+          <div className="space-y-2 p-2 rounded editor-surface-2">
+            <div className="text-xs font-semibold editor-text flex items-center gap-1.5">
+              <LineChart size={11} /> Curves (S-Curve)
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <Label className="editor-text-muted">Mid point</Label>
+              <span className="editor-text">{curvesMid}</span>
+            </div>
+            <Slider value={[curvesMid]} min={32} max={224} step={1} onValueChange={setCurvesMid} />
+            <Button
+              onClick={() => applyAdjustment('Curves', (ctx, w, h) => applyCurves(ctx, w, h, [
+                { x: 0, y: 0 },
+                { x: curvesMid - 32, y: Math.max(0, curvesMid - 48) },
+                { x: curvesMid + 32, y: Math.min(255, curvesMid + 48) },
+                { x: 255, y: 255 },
+              ]))}
+              variant="secondary"
+              size="sm"
+              className="w-full h-7 text-xs"
+            >Apply Curves</Button>
+          </div>
+
+          {/* Channel Mixer */}
+          <div className="space-y-2 p-2 rounded editor-surface-2">
+            <div className="text-xs font-semibold editor-text flex items-center gap-1.5">
+              <SplitSquareHorizontal size={11} /> Channel Mixer
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <Label className="editor-text-muted">Red ← Red %</Label>
+              <span className="editor-text">{channelMixR}</span>
+            </div>
+            <Slider value={[channelMixR]} min={0} max={200} step={1} onValueChange={setChannelMixR} />
+            <Button
+              onClick={() => applyAdjustment('Channel Mixer', (ctx, w, h) => applyChannelMixer(ctx, w, h, {
+                rOut: { r: channelMixR, g: 0, b: 0 },
+                gOut: { r: (100 - channelMixR) / 2, g: 100, b: 0 },
+                bOut: { r: (100 - channelMixR) / 2, g: 0, b: 100 },
+              }))}
+              variant="secondary"
+              size="sm"
+              className="w-full h-7 text-xs"
+            >Apply Channel Mixer</Button>
+          </div>
+
+          {/* HDR Toning */}
+          <div className="space-y-2 p-2 rounded editor-surface-2">
+            <div className="text-xs font-semibold editor-text flex items-center gap-1.5">
+              <TrendingUp size={11} /> HDR Toning
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <Label className="editor-text-muted">Strength</Label>
+              <span className="editor-text">{hdrStrength}</span>
+            </div>
+            <Slider value={[hdrStrength]} min={0} max={100} step={1} onValueChange={setHdrStrength} />
+            <div className="flex items-center justify-between text-xs">
+              <Label className="editor-text-muted">Radius</Label>
+              <span className="editor-text">{hdrRadius}px</span>
+            </div>
+            <Slider value={[hdrRadius]} min={1} max={20} step={1} onValueChange={setHdrRadius} />
+            <Button
+              onClick={() => applyAdjustment('HDR Toning', (ctx, w, h) => applyHDRToning(ctx, w, h, hdrStrength, hdrRadius))}
+              variant="secondary"
+              size="sm"
+              className="w-full h-7 text-xs"
+              disabled={hdrStrength <= 0}
+            >Apply HDR Toning</Button>
+          </div>
         </div>
       </div>
     </div>

@@ -8,6 +8,8 @@ import {
   hexToRgb,
   sampleColor,
   generateThumbnail,
+  healSpot,
+  liquify,
 } from '@/lib/image-processing';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -37,6 +39,10 @@ export function EditorCanvas() {
   const pushHistory = useEditorStore((s) => s.pushHistory);
   const setToolOptions = useEditorStore((s) => s.setToolOptions);
   const setTool = useEditorStore((s) => s.setTool);
+  const showGrid = useEditorStore((s) => s.showGrid);
+  const guides = useEditorStore((s) => s.guides);
+  const snapToGuides = useEditorStore((s) => s.snapToGuides);
+  const addGuide = useEditorStore((s) => s.addGuide);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const compositeCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -61,6 +67,15 @@ export function EditorCanvas() {
   const cloneLastRef = useRef<Point | null>(null);
   // Snapshot of all layers (composite) for clone sampling
   const cloneSampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Healing brush source (same Alt+Click workflow as clone stamp)
+  const healSourceRef = useRef<Point | null>(null);
+  const healSampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Pen tool: list of anchor points with optional control handles
+  const penPointsRef = useRef<{ x: number; y: number; h1?: Point; h2?: Point }[]>([]);
+  // Liquify last position
+  const liquifyLastRef = useRef<Point | null>(null);
+  // Brush stabilizer: smoothed position
+  const stabilizerPosRef = useRef<Point | null>(null);
 
   const [cursorPos, setCursorPos] = useState<Point | null>(null);
   const [, forceRender] = useState(0);
@@ -95,7 +110,18 @@ export function EditorCanvas() {
       ctx.save();
       ctx.globalAlpha = layer.opacity;
       ctx.globalCompositeOperation = layer.blendMode as GlobalCompositeOperation;
-      ctx.drawImage(layer.canvas, 0, 0);
+      // If layer has a mask enabled, apply it via destination-in
+      if (layer.maskCanvas && layer.maskEnabled) {
+        // Draw the layer content to a temp canvas, then mask it, then composite
+        const tmp = createBlankCanvas(docWidth, docHeight);
+        const tmpCtx = tmp.getContext('2d')!;
+        tmpCtx.drawImage(layer.canvas, 0, 0);
+        tmpCtx.globalCompositeOperation = 'destination-in';
+        tmpCtx.drawImage(layer.maskCanvas, 0, 0);
+        ctx.drawImage(tmp, 0, 0);
+      } else {
+        ctx.drawImage(layer.canvas, 0, 0);
+      }
       ctx.restore();
     }
   }, [layers, docWidth, docHeight]);
@@ -108,6 +134,47 @@ export function EditorCanvas() {
     canvas.height = docHeight;
     const ctx = canvas.getContext('2d')!;
     ctx.clearRect(0, 0, docWidth, docHeight);
+
+    // Grid
+    if (showGrid) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(100, 150, 255, 0.25)';
+      ctx.lineWidth = 1;
+      const gridSize = 50;
+      for (let x = 0; x <= docWidth; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, 0);
+        ctx.lineTo(x + 0.5, docHeight);
+        ctx.stroke();
+      }
+      for (let y = 0; y <= docHeight; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y + 0.5);
+        ctx.lineTo(docWidth, y + 0.5);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Guides
+    if (guides.x.length > 0 || guides.y.length > 0) {
+      ctx.save();
+      ctx.strokeStyle = '#00ddff';
+      ctx.lineWidth = 1;
+      for (const gx of guides.x) {
+        ctx.beginPath();
+        ctx.moveTo(gx + 0.5, 0);
+        ctx.lineTo(gx + 0.5, docHeight);
+        ctx.stroke();
+      }
+      for (const gy of guides.y) {
+        ctx.beginPath();
+        ctx.moveTo(0, gy + 0.5);
+        ctx.lineTo(docWidth, gy + 0.5);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
 
     // Selection marquee ("marching ants")
     if (selectionMask && selectionBounds) {
@@ -140,7 +207,7 @@ export function EditorCanvas() {
       ctx.stroke();
       ctx.restore();
     }
-  }, [selectionMask, selectionBounds, activeTool, cursorPos, docWidth, docHeight]);
+  }, [selectionMask, selectionBounds, activeTool, cursorPos, docWidth, docHeight, showGrid, guides]);
 
   // Animation loop for marching ants
   useEffect(() => {
@@ -186,6 +253,39 @@ export function EditorCanvas() {
     }
     return strokeCanvasRef.current;
   }, [docWidth, docHeight]);
+
+  // Apply symmetry: mirror a point based on symmetry mode (defined early so other callbacks can use it)
+  const applySymmetry = useCallback((p: Point): Point[] => {
+    const mode = toolOptions.symmetryMode;
+    if (mode === 'none') return [p];
+    const cx = docWidth / 2;
+    const cy = docHeight / 2;
+    const points: Point[] = [p];
+    if (mode === 'horizontal' || mode === 'quad') {
+      points.push({ x: 2 * cx - p.x, y: p.y });
+    }
+    if (mode === 'vertical' || mode === 'quad') {
+      points.push({ x: p.x, y: 2 * cy - p.y });
+    }
+    if (mode === 'quad') {
+      points.push({ x: 2 * cx - p.x, y: 2 * cy - p.y });
+    }
+    if (mode === 'mandala') {
+      const segments = Math.max(2, toolOptions.symmetrySegments);
+      const dx = p.x - cx;
+      const dy = p.y - cy;
+      for (let i = 1; i < segments; i++) {
+        const angle = (2 * Math.PI * i) / segments;
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        points.push({
+          x: cx + dx * cos - dy * sin,
+          y: cy + dx * sin + dy * cos,
+        });
+      }
+    }
+    return points;
+  }, [toolOptions.symmetryMode, toolOptions.symmetrySegments, docWidth, docHeight]);
 
   // Drawing tools: brush stroke segment
   const drawStrokeSegment = useCallback((from: Point, to: Point, opts: {
@@ -243,31 +343,47 @@ export function EditorCanvas() {
     const layer = getActiveLayer();
     if (!layer || !strokeCanvasRef.current) return;
     const ctx = layer.canvas.getContext('2d')!;
-    ctx.save();
-    // If there's a selection, clip to it
-    if (selectionMask) {
-      // Use mask as clip - mask is white where selected
-      // We can use destination-in approach: composite stroke onto layer, then mask result
+    // Get symmetric offsets for the stroke
+    const strokeCanvas = strokeCanvasRef.current;
+    const symmetryPoints = applySymmetry({ x: 0, y: 0 });
+    for (const offset of symmetryPoints) {
+      // For non-zero offsets, mirror the stroke canvas
       ctx.save();
-      // Create clip from mask
-      const clipCanvas = createBlankCanvas(docWidth, docHeight);
-      const clipCtx = clipCanvas.getContext('2d')!;
-      clipCtx.drawImage(selectionMask, 0, 0);
-      // We need to apply stroke only inside the mask area.
-      // Approach: draw stroke to a temp canvas, apply mask via destination-in, then draw onto layer.
-      const tmp = createBlankCanvas(docWidth, docHeight);
-      const tmpCtx = tmp.getContext('2d')!;
-      tmpCtx.drawImage(strokeCanvasRef.current, 0, 0);
-      tmpCtx.globalCompositeOperation = 'destination-in';
-      tmpCtx.drawImage(clipCanvas, 0, 0);
+      // If there's a selection, clip to it
+      if (selectionMask) {
+        const clipCanvas = createBlankCanvas(docWidth, docHeight);
+        const clipCtx = clipCanvas.getContext('2d')!;
+        clipCtx.drawImage(selectionMask, 0, 0);
+        const tmp = createBlankCanvas(docWidth, docHeight);
+        const tmpCtx = tmp.getContext('2d')!;
+        // Mirror if needed
+        if (offset.x !== 0 || offset.y !== 0) {
+          tmpCtx.save();
+          tmpCtx.translate(offset.x === 0 ? 0 : docWidth, offset.y === 0 ? 0 : docHeight);
+          tmpCtx.scale(offset.x === 0 ? 1 : -1, offset.y === 0 ? 1 : -1);
+          tmpCtx.drawImage(strokeCanvas, 0, 0);
+          tmpCtx.restore();
+        } else {
+          tmpCtx.drawImage(strokeCanvas, 0, 0);
+        }
+        tmpCtx.globalCompositeOperation = 'destination-in';
+        tmpCtx.drawImage(clipCanvas, 0, 0);
+        ctx.drawImage(tmp, 0, 0);
+      } else {
+        if (offset.x !== 0 || offset.y !== 0) {
+          ctx.save();
+          ctx.translate(offset.x === 0 ? 0 : docWidth, offset.y === 0 ? 0 : docHeight);
+          ctx.scale(offset.x === 0 ? 1 : -1, offset.y === 0 ? 1 : -1);
+          ctx.drawImage(strokeCanvas, 0, 0);
+          ctx.restore();
+        } else {
+          ctx.drawImage(strokeCanvas, 0, 0);
+        }
+      }
       ctx.restore();
-      ctx.drawImage(tmp, 0, 0);
-    } else {
-      ctx.drawImage(strokeCanvasRef.current, 0, 0);
     }
-    ctx.restore();
     refreshThumbnail(layer.id);
-  }, [getActiveLayer, selectionMask, docWidth, docHeight, refreshThumbnail]);
+  }, [getActiveLayer, selectionMask, docWidth, docHeight, refreshThumbnail, applySymmetry]);
 
   const clearStrokeCanvas = useCallback(() => {
     if (strokeCanvasRef.current) {
@@ -380,6 +496,119 @@ export function EditorCanvas() {
     // Update the composite preview
     composite();
   }, [getActiveLayer, toolOptions.brushSize, toolOptions.brushHardness, toolOptions.brushOpacity, selectionMask, docWidth, docHeight, composite]);
+
+  // Healing brush: similar to clone stamp but uses healSpot for content-aware blending
+  const drawHealStroke = useCallback((from: Point, to: Point) => {
+    const layer = getActiveLayer();
+    if (!layer || !healSourceRef.current || !healSampleCanvasRef.current) return;
+    const source = healSourceRef.current;
+    const sample = healSampleCanvasRef.current;
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const srcX = source.x + dx;
+    const srcY = source.y + dy;
+    const radius = Math.max(2, toolOptions.brushSize / 2);
+    const ctx = layer.canvas.getContext('2d', { willReadFrequently: true })!;
+    // Use the healSpot function but with a temp approach: blend sample region into layer
+    healSpot(ctx, layer.canvas.width, layer.canvas.height, to.x, to.y, radius, srcX, srcY);
+    void sample;
+    composite();
+  }, [getActiveLayer, toolOptions.brushSize, composite]);
+
+  // Liquify operation
+  const applyLiquify = useCallback((center: Point, from: Point, to: Point) => {
+    const layer = getActiveLayer();
+    if (!layer || layer.locked) return;
+    const ctx = layer.canvas.getContext('2d', { willReadFrequently: true })!;
+    const direction = { x: to.x - from.x, y: to.y - from.y };
+    const opMap = {
+      'liquify-push': 'push' as const,
+      'liquify-pucker': 'pucker' as const,
+      'liquify-bloat': 'bloat' as const,
+      'liquify-twirl': 'twirl' as const,
+    };
+    const op = opMap[activeTool as keyof typeof opMap];
+    if (!op) return;
+    liquify(ctx, layer.canvas.width, layer.canvas.height, center.x, center.y, toolOptions.brushSize / 2, toolOptions.liquifyStrength, op, direction);
+    composite();
+  }, [getActiveLayer, activeTool, toolOptions.brushSize, toolOptions.liquifyStrength, composite]);
+
+  // Pen tool: render the current path being drawn
+  const drawPenPath = useCallback(() => {
+    const canvas = compositeCanvasRef.current;
+    if (!canvas) return;
+    composite();
+    const ctx = canvas.getContext('2d')!;
+    const pts = penPointsRef.current;
+    if (pts.length === 0) return;
+    ctx.save();
+    ctx.strokeStyle = '#00aaff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) {
+      if (pts[i - 1].h2 && pts[i].h1) {
+        ctx.bezierCurveTo(pts[i - 1].h2!.x, pts[i - 1].h2!.y, pts[i].h1!.x, pts[i].h1!.y, pts[i].x, pts[i].y);
+      } else {
+        ctx.lineTo(pts[i].x, pts[i].y);
+      }
+    }
+    ctx.stroke();
+    // Draw anchor points
+    for (const p of pts) {
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#00aaff';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.rect(p.x - 3, p.y - 3, 6, 6);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }, [composite]);
+
+  // Commit pen path to layer as a stroke (or fill if closed)
+  const commitPenPath = useCallback(() => {
+    const layer = getActiveLayer();
+    if (!layer || layer.locked) return;
+    const pts = penPointsRef.current;
+    if (pts.length < 2) {
+      penPointsRef.current = [];
+      return;
+    }
+    const ctx = layer.canvas.getContext('2d')!;
+    ctx.save();
+    ctx.strokeStyle = foreground;
+    ctx.lineWidth = Math.max(1, toolOptions.shapeStrokeWidth);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) {
+      if (pts[i - 1].h2 && pts[i].h1) {
+        ctx.bezierCurveTo(pts[i - 1].h2!.x, pts[i - 1].h2!.y, pts[i].h1!.x, pts[i].h1!.y, pts[i].x, pts[i].y);
+      } else {
+        ctx.lineTo(pts[i].x, pts[i].y);
+      }
+    }
+    // Close path
+    if (pts[0].h2 && pts[pts.length - 1].h1) {
+      ctx.bezierCurveTo(pts[pts.length - 1].h2?.x || pts[pts.length - 1].x, pts[pts.length - 1].h2?.y || pts[pts.length - 1].y, pts[0].h1?.x || pts[0].x, pts[0].h1?.y || pts[0].y, pts[0].x, pts[0].y);
+    } else {
+      ctx.lineTo(pts[0].x, pts[0].y);
+    }
+    ctx.closePath();
+    if (toolOptions.shapeFilled) {
+      ctx.fillStyle = foreground;
+      ctx.fill();
+    }
+    ctx.stroke();
+    ctx.restore();
+    refreshThumbnail(layer.id);
+    pushHistory('Pen Path');
+    penPointsRef.current = [];
+    composite();
+  }, [getActiveLayer, foreground, toolOptions.shapeStrokeWidth, toolOptions.shapeFilled, refreshThumbnail, pushHistory, composite])
 
   // Selection creation helpers
   const createRectMask = useCallback((x: number, y: number, w: number, h: number, ellipse: boolean) => {
@@ -805,12 +1034,72 @@ export function EditorCanvas() {
       drawCloneStamp(pt, pt);
       return;
     }
+
+    // Healing brush (similar Alt+Click workflow)
+    if (activeTool === 'heal-brush') {
+      const layer = getActiveLayer();
+      if (!layer) {
+        toast.error('No active layer');
+        return;
+      }
+      if (layer.locked) {
+        toast.error('Layer is locked');
+        return;
+      }
+      if (e.altKey) {
+        healSourceRef.current = pt;
+        const composite = compositeCanvasRef.current;
+        if (composite) {
+          const snap = createBlankCanvas(docWidth, docHeight);
+          snap.getContext('2d')!.drawImage(composite, 0, 0);
+          healSampleCanvasRef.current = snap;
+        }
+        toast.success(`Heal source set: ${Math.round(pt.x)}, ${Math.round(pt.y)}`);
+        return;
+      }
+      if (!healSourceRef.current || !healSampleCanvasRef.current) {
+        toast.error('Alt+Click to set heal source first');
+        return;
+      }
+      drawingRef.current = true;
+      liquifyLastRef.current = pt; // reuse for tracking last pos
+      drawHealStroke(pt, pt);
+      return;
+    }
+
+    // Pen tool: add anchor point
+    if (activeTool === 'pen') {
+      // On Enter key, the path is committed (handled in keyboard section)
+      // For now, just add a point on click
+      penPointsRef.current.push({ x: pt.x, y: pt.y });
+      drawPenPath();
+      forceRender((v) => v + 1);
+      return;
+    }
+
+    // Liquify tools
+    if (activeTool === 'liquify-push' || activeTool === 'liquify-pucker' || activeTool === 'liquify-bloat' || activeTool === 'liquify-twirl') {
+      const layer = getActiveLayer();
+      if (!layer) {
+        toast.error('No active layer');
+        return;
+      }
+      if (layer.locked) {
+        toast.error('Layer is locked');
+        return;
+      }
+      drawingRef.current = true;
+      liquifyLastRef.current = pt;
+      // Apply once for click without drag
+      applyLiquify(pt, pt, { x: pt.x + 0.1, y: pt.y });
+      return;
+    }
   }, [
     activeTool, panX, panY, toCanvasCoords, setPan, setZoom, zoom,
     clearSelection, magicWand, toolOptions, foreground, bucketFill,
     addText, clearStrokeCanvas, drawStrokeSegment, previewStroke,
     setSelection, createLassoMask, setForeground, getActiveLayer,
-    docWidth, docHeight, drawCloneStamp,
+    docWidth, docHeight, drawCloneStamp, drawHealStroke, drawPenPath, applyLiquify,
   ]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
@@ -912,9 +1201,25 @@ export function EditorCanvas() {
     }
 
     if (activeTool === 'brush' || activeTool === 'pencil' || activeTool === 'eraser') {
-      const last = lastPointRef.current ?? pt;
+      // Brush stabilizer: weighted moving average for smoother strokes
+      let targetPt = pt;
+      if (toolOptions.brushStabilizer > 0) {
+        if (!stabilizerPosRef.current) {
+          stabilizerPosRef.current = pt;
+        } else {
+          const factor = 1 - (toolOptions.brushStabilizer / 100) * 0.7;
+          stabilizerPosRef.current = {
+            x: stabilizerPosRef.current.x + (pt.x - stabilizerPosRef.current.x) * factor,
+            y: stabilizerPosRef.current.y + (pt.y - stabilizerPosRef.current.y) * factor,
+          };
+          targetPt = stabilizerPosRef.current;
+        }
+      } else {
+        stabilizerPosRef.current = pt;
+      }
+      const last = lastPointRef.current ?? targetPt;
       const hardness = activeTool === 'pencil' ? 100 : toolOptions.brushHardness;
-      drawStrokeSegment(last, pt, {
+      drawStrokeSegment(last, targetPt, {
         color: foreground,
         size: toolOptions.brushSize,
         hardness,
@@ -922,7 +1227,7 @@ export function EditorCanvas() {
         erase: activeTool === 'eraser',
       });
       previewStroke();
-      lastPointRef.current = pt;
+      lastPointRef.current = targetPt;
       return;
     }
 
@@ -941,10 +1246,40 @@ export function EditorCanvas() {
       cloneLastRef.current = pt;
       return;
     }
+
+    // Healing brush continuous painting
+    if (activeTool === 'heal-brush') {
+      const last = liquifyLastRef.current ?? pt;
+      const dist = Math.hypot(pt.x - last.x, pt.y - last.y);
+      const step = Math.max(1, toolOptions.brushSize / 4);
+      const steps = Math.max(1, Math.ceil(dist / step));
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        const p = { x: last.x + (pt.x - last.x) * t, y: last.y + (pt.y - last.y) * t };
+        drawHealStroke(last, p);
+      }
+      liquifyLastRef.current = pt;
+      return;
+    }
+
+    // Liquify continuous painting
+    if (activeTool === 'liquify-push' || activeTool === 'liquify-pucker' || activeTool === 'liquify-bloat' || activeTool === 'liquify-twirl') {
+      const last = liquifyLastRef.current ?? pt;
+      const dist = Math.hypot(pt.x - last.x, pt.y - last.y);
+      const step = Math.max(2, toolOptions.brushSize / 4);
+      const steps = Math.max(1, Math.ceil(dist / step));
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        const p = { x: last.x + (pt.x - last.x) * t, y: last.y + (pt.y - last.y) * t };
+        applyLiquify(p, last, p);
+      }
+      liquifyLastRef.current = pt;
+      return;
+    }
   }, [
     activeTool, toCanvasCoords, handlePan, createRectMask, setSelection,
     createLassoMask, docWidth, docHeight, composite, foreground, background,
-    toolOptions, drawStrokeSegment, previewStroke, drawCloneStamp,
+    toolOptions, drawStrokeSegment, previewStroke, drawCloneStamp, drawHealStroke, applyLiquify,
   ]);
 
   const onPointerUp = useCallback((e: React.PointerEvent) => {
@@ -1032,6 +1367,28 @@ export function EditorCanvas() {
       composite();
       return;
     }
+
+    if (activeTool === 'heal-brush') {
+      const layer = getActiveLayer();
+      if (layer) {
+        refreshThumbnail(layer.id);
+        pushHistory('Heal Brush');
+      }
+      liquifyLastRef.current = null;
+      composite();
+      return;
+    }
+
+    if (activeTool === 'liquify-push' || activeTool === 'liquify-pucker' || activeTool === 'liquify-bloat' || activeTool === 'liquify-twirl') {
+      const layer = getActiveLayer();
+      if (layer) {
+        refreshThumbnail(layer.id);
+        pushHistory(`Liquify ${activeTool.split('-')[1]}`);
+      }
+      liquifyLastRef.current = null;
+      composite();
+      return;
+    }
   }, [
     activeTool, toCanvasCoords, panStartRef, selectionBounds, createLassoMask,
     setSelection, pushHistory, clearSelection, gradientFill, drawShape,
@@ -1053,7 +1410,7 @@ export function EditorCanvas() {
   const cursorStyle = useCallback((): string => {
     switch (activeTool) {
       case 'hand': return 'grab';
-      case 'brush': case 'pencil': case 'eraser': case 'clone-stamp': return 'crosshair';
+      case 'brush': case 'pencil': case 'eraser': case 'clone-stamp': case 'heal-brush': return 'crosshair';
       case 'eyedropper': return 'crosshair';
       case 'bucket': return 'crosshair';
       case 'marquee-rect': case 'marquee-ellipse': case 'lasso': case 'polygonal-lasso': case 'magnetic-lasso': case 'magic-wand': return 'crosshair';
@@ -1061,8 +1418,9 @@ export function EditorCanvas() {
       case 'move': return 'move';
       case 'zoom': return 'zoom-in';
       case 'crop': return 'crosshair';
-      case 'shape-rect': case 'shape-ellipse': case 'shape-line': return 'crosshair';
+      case 'shape-rect': case 'shape-ellipse': case 'shape-line': case 'pen': return 'crosshair';
       case 'gradient': return 'crosshair';
+      case 'liquify-push': case 'liquify-pucker': case 'liquify-bloat': case 'liquify-twirl': return 'crosshair';
       default: return 'default';
     }
   }, [activeTool]);
@@ -1099,10 +1457,24 @@ export function EditorCanvas() {
         v: 'move', m: 'marquee-rect', l: 'lasso', w: 'magic-wand', c: 'crop',
         i: 'eyedropper', b: 'brush', e: 'eraser', g: 'bucket', t: 'text',
         u: 'shape-rect', h: 'hand', z: 'zoom', s: 'clone-stamp',
+        j: 'heal-brush', p: 'pen', r: 'liquify-push',
       };
       if (e.key === ' ' && !e.repeat) {
         spacePressed.current = true;
         return;
+      }
+      // Pen tool: Enter commits the path, Escape cancels
+      if (useEditorStore.getState().activeTool === 'pen') {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          commitPenPath();
+          return;
+        }
+        if (e.key === 'Escape') {
+          penPointsRef.current = [];
+          composite();
+          return;
+        }
       }
       if (map[e.key.toLowerCase()]) {
         setTool(map[e.key.toLowerCase()]);
@@ -1125,7 +1497,7 @@ export function EditorCanvas() {
       window.removeEventListener('keydown', handler);
       window.removeEventListener('keyup', upHandler);
     };
-  }, [zoom, setZoom, setTool, setToolOptions, toolOptions.brushSize]);
+  }, [zoom, setZoom, setTool, setToolOptions, toolOptions.brushSize, commitPenPath, composite]);
 
   // Auto-fit zoom to container on mount (when container first measured)
   const hasAutoFitRef = useRef(false);

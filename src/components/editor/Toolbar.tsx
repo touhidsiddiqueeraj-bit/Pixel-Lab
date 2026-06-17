@@ -20,6 +20,12 @@ import {
   ZoomIn,
   Triangle,
   Stamp,
+  Bandage,
+  Pen,
+  Wind,
+  Shrink,
+  Expand,
+  RotateCw,
 } from 'lucide-react';
 import { useEditorStore } from '@/lib/editor-store';
 import { ToolType } from '@/lib/editor-types';
@@ -55,6 +61,7 @@ const TOOLS: { section: string; items: ToolDef[] }[] = [
       { type: 'pencil', icon: <Pencil size={18} />, label: 'Pencil', shortcut: 'B' },
       { type: 'eraser', icon: <Eraser size={18} />, label: 'Eraser', shortcut: 'E' },
       { type: 'clone-stamp', icon: <Stamp size={18} />, label: 'Clone Stamp', shortcut: 'S' },
+      { type: 'heal-brush', icon: <Bandage size={18} />, label: 'Healing Brush', shortcut: 'J' },
       { type: 'bucket', icon: <PaintBucket size={18} />, label: 'Paint Bucket', shortcut: 'G' },
       { type: 'gradient', icon: <Palette size={18} />, label: 'Gradient', shortcut: 'G' },
     ],
@@ -62,10 +69,20 @@ const TOOLS: { section: string; items: ToolDef[] }[] = [
   {
     section: 'Vector & Text',
     items: [
+      { type: 'pen', icon: <Pen size={18} />, label: 'Pen Tool', shortcut: 'P' },
       { type: 'text', icon: <Type size={18} />, label: 'Text', shortcut: 'T' },
       { type: 'shape-rect', icon: <Square size={18} />, label: 'Rectangle Shape', shortcut: 'U' },
       { type: 'shape-ellipse', icon: <Circle size={18} />, label: 'Ellipse Shape', shortcut: 'U' },
       { type: 'shape-line', icon: <Minus size={18} />, label: 'Line Shape', shortcut: 'U' },
+    ],
+  },
+  {
+    section: 'Liquify',
+    items: [
+      { type: 'liquify-push', icon: <Wind size={18} />, label: 'Liquify Push', shortcut: 'R' },
+      { type: 'liquify-pucker', icon: <Shrink size={18} />, label: 'Liquify Pucker', shortcut: 'R' },
+      { type: 'liquify-bloat', icon: <Expand size={18} />, label: 'Liquify Bloat', shortcut: 'R' },
+      { type: 'liquify-twirl', icon: <RotateCw size={18} />, label: 'Liquify Twirl', shortcut: 'R' },
     ],
   },
   {

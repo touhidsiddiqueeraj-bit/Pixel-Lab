@@ -18,6 +18,12 @@ import {
   Hand,
   ZoomIn,
   Stamp,
+  Bandage,
+  Pen,
+  Wind,
+  Shrink,
+  Expand,
+  RotateCw,
 } from 'lucide-react';
 
 export const TOOL_PRESETS: Record<ToolType, { icon: React.ReactNode; label: string; hint: string }> = {
@@ -33,13 +39,19 @@ export const TOOL_PRESETS: Record<ToolType, { icon: React.ReactNode; label: stri
   'brush': { icon: <Brush size={16} />, label: 'Brush', hint: 'Paint with soft edges using foreground color.' },
   'pencil': { icon: <Pencil size={16} />, label: 'Pencil', hint: 'Paint with hard edges using foreground color.' },
   'eraser': { icon: <Eraser size={16} />, label: 'Eraser', hint: 'Erase pixels to transparency.' },
+  'clone-stamp': { icon: <Stamp size={16} />, label: 'Clone Stamp', hint: 'Alt+Click to set source, then paint to clone.' },
+  'heal-brush': { icon: <Bandage size={16} />, label: 'Healing Brush', hint: 'Alt+Click to set source, then paint to heal blemishes.' },
+  'pen': { icon: <Pen size={16} />, label: 'Pen Tool', hint: 'Click to add anchor points. Drag to create curves. Enter to close path.' },
   'bucket': { icon: <PaintBucket size={16} />, label: 'Paint Bucket', hint: 'Fill area with foreground color based on tolerance.' },
   'gradient': { icon: <Palette size={16} />, label: 'Gradient', hint: 'Drag to create a gradient from foreground to background.' },
   'text': { icon: <Type size={16} />, label: 'Text', hint: 'Click to place text. Type to add content.' },
   'shape-rect': { icon: <Square size={16} />, label: 'Rectangle', hint: 'Drag to draw a rectangle.' },
   'shape-ellipse': { icon: <Circle size={16} />, label: 'Ellipse', hint: 'Drag to draw an ellipse.' },
   'shape-line': { icon: <Minus size={16} />, label: 'Line', hint: 'Drag to draw a line.' },
-  'clone-stamp': { icon: <Stamp size={16} />, label: 'Clone Stamp', hint: 'Alt+Click to set source, then paint to clone.' },
+  'liquify-push': { icon: <Wind size={16} />, label: 'Liquify: Push', hint: 'Drag to push pixels in stroke direction.' },
+  'liquify-pucker': { icon: <Shrink size={16} />, label: 'Liquify: Pucker', hint: 'Click/drag to pull pixels toward center.' },
+  'liquify-bloat': { icon: <Expand size={16} />, label: 'Liquify: Bloat', hint: 'Click/drag to push pixels outward.' },
+  'liquify-twirl': { icon: <RotateCw size={16} />, label: 'Liquify: Twirl', hint: 'Click/drag to rotate pixels around center.' },
   'hand': { icon: <Hand size={16} />, label: 'Hand', hint: 'Drag to pan the canvas.' },
   'zoom': { icon: <ZoomIn size={16} />, label: 'Zoom', hint: 'Click to zoom in, Alt+Click to zoom out.' },
 };

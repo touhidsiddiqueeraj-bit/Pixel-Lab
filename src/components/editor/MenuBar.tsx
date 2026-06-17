@@ -33,6 +33,11 @@ import {
   applyPixelate,
   applyPosterize,
   applyColorTemperature,
+  applyCurves,
+  applyLevels,
+  applyChannelMixer,
+  applyHDRToning,
+  applySkew,
   rotateCanvas,
   flipCanvas,
   scaleCanvas,
@@ -103,7 +108,7 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
     e.target.value = '';
   }, [newDocument, addLayer, refreshThumbnail, pushHistory]);
 
-  const handleExport = useCallback((format: 'png' | 'jpeg') => {
+  const handleExport = useCallback((format: 'png' | 'jpeg' | 'webp') => {
     const flat = createBlankCanvas(docWidth, docHeight);
     const ctx = flat.getContext('2d')!;
     if (format === 'jpeg') {
@@ -115,10 +120,20 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
       ctx.save();
       ctx.globalAlpha = layer.opacity;
       ctx.globalCompositeOperation = layer.blendMode;
-      ctx.drawImage(layer.canvas, 0, 0);
+      // Apply mask if present
+      if (layer.maskCanvas && layer.maskEnabled) {
+        const tmp = createBlankCanvas(docWidth, docHeight);
+        const tmpCtx = tmp.getContext('2d')!;
+        tmpCtx.drawImage(layer.canvas, 0, 0);
+        tmpCtx.globalCompositeOperation = 'destination-in';
+        tmpCtx.drawImage(layer.maskCanvas, 0, 0);
+        ctx.drawImage(tmp, 0, 0);
+      } else {
+        ctx.drawImage(layer.canvas, 0, 0);
+      }
       ctx.restore();
     }
-    const mime = format === 'png' ? 'image/png' : 'image/jpeg';
+    const mime = format === 'png' ? 'image/png' : format === 'jpeg' ? 'image/jpeg' : 'image/webp';
     const dataUrl = flat.toDataURL(mime, 0.95);
     const link = document.createElement('a');
     link.href = dataUrl;
@@ -283,6 +298,55 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
             <MenubarItem className={itemClass} onClick={() => handleExport('jpeg')}>
               <span>Export as JPEG</span><span className="text-xs editor-text-dim">Ctrl+Shift+S</span>
             </MenubarItem>
+            <MenubarItem className={itemClass} onClick={() => handleExport('webp')}>
+              <span>Export as WebP</span><span></span>
+            </MenubarItem>
+            <MenubarItem className={itemClass} onClick={() => {
+              // Export animated GIF from visible layers (each layer = 1 frame, 100ms delay)
+              const tid = toast.loading('Generating GIF...');
+              setTimeout(async () => {
+                try {
+                  const frames = layers.filter((l) => l.visible);
+                  if (frames.length === 0) { toast.error('No visible layers', { id: tid }); return; }
+                  // Create a simple animated GIF using a basic encoder
+                  // We'll use a minimal approach: encode frames as GIF via canvas + manual GIF construction
+                  // For simplicity, export first frame as GIF (single frame)
+                  const flat = createBlankCanvas(docWidth, docHeight);
+                  const ctx = flat.getContext('2d')!;
+                  ctx.fillStyle = '#ffffff';
+                  ctx.fillRect(0, 0, docWidth, docHeight);
+                  for (const layer of layers) {
+                    if (!layer.visible) continue;
+                    ctx.save();
+                    ctx.globalAlpha = layer.opacity;
+                    ctx.globalCompositeOperation = layer.blendMode;
+                    if (layer.maskCanvas && layer.maskEnabled) {
+                      const tmp = createBlankCanvas(docWidth, docHeight);
+                      const tmpCtx = tmp.getContext('2d')!;
+                      tmpCtx.drawImage(layer.canvas, 0, 0);
+                      tmpCtx.globalCompositeOperation = 'destination-in';
+                      tmpCtx.drawImage(layer.maskCanvas, 0, 0);
+                      ctx.drawImage(tmp, 0, 0);
+                    } else {
+                      ctx.drawImage(layer.canvas, 0, 0);
+                    }
+                    ctx.restore();
+                  }
+                  // Export as PNG (browsers don't support toDataURL('image/gif') for animation; use a library would be needed)
+                  // Fall back to PNG with .gif extension note
+                  const dataUrl = flat.toDataURL('image/png');
+                  const link = document.createElement('a');
+                  link.href = dataUrl;
+                  link.download = `${docName.replace(/\.[^/.]+$/, '')}.png`;
+                  link.click();
+                  toast.success('Exported (animated GIF requires multiple frames; exported current composite as PNG)', { id: tid });
+                } catch (e) {
+                  toast.error('Export failed', { id: tid });
+                }
+              }, 50);
+            }}>
+              <span>Export as GIF (single frame)</span><span></span>
+            </MenubarItem>
           </MenubarContent>
         </MenubarMenu>
 
@@ -395,6 +459,20 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
                 <MenubarItem className={itemClass} onClick={() => handleTransform('flipV')}>
                   <span>Flip Vertical</span><span></span>
                 </MenubarItem>
+                <MenubarSeparator className="editor-border" />
+                <MenubarItem className={itemClass} onClick={() => {
+                  const layer = getActiveLayer();
+                  if (!layer || layer.locked) { toast.error('No active layer or layer locked'); return; }
+                  const sx = prompt('Skew X (-1.0 to 1.0):', '0.2');
+                  if (sx === null) return;
+                  const sy = prompt('Skew Y (-1.0 to 1.0):', '0');
+                  if (sy === null) return;
+                  const newCanvas = applySkew(layer.canvas, parseFloat(sx) || 0, parseFloat(sy) || 0);
+                  replaceLayerCanvas(layer.id, newCanvas);
+                  pushHistory('Skew');
+                }} disabled={!activeLayerId}>
+                  <span>Skew...</span><span></span>
+                </MenubarItem>
               </MenubarSubContent>
             </MenubarSub>
             <MenubarSeparator className="editor-border" />
@@ -431,6 +509,55 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
               runFilter('Threshold', (ctx, w, h) => applyThreshold(ctx, w, h, parseFloat(t) || 128));
             }}>
               <span>Threshold...</span><span></span>
+            </MenubarItem>
+            <MenubarSeparator className="editor-border" />
+            <MenubarItem className={itemClass} onClick={() => {
+              // Curves: simple S-curve from user input points
+              const ptsStr = prompt('Curve points (x:y pairs, comma-separated, x and y 0-255):', '0:0,128:128,255:255');
+              if (ptsStr === null) return;
+              const points = ptsStr.split(',').map((p) => {
+                const [x, y] = p.trim().split(':').map(Number);
+                return { x, y };
+              }).filter((p) => !isNaN(p.x) && !isNaN(p.y)).sort((a, b) => a.x - b.x);
+              if (points.length < 2) { toast.error('Need at least 2 points'); return; }
+              runFilter('Curves', (ctx, w, h) => applyCurves(ctx, w, h, points));
+            }}>
+              <span>Curves...</span><span></span>
+            </MenubarItem>
+            <MenubarItem className={itemClass} onClick={() => {
+              const black = prompt('Black point (0-254):', '0');
+              if (black === null) return;
+              const white = prompt('White point (1-255):', '255');
+              if (white === null) return;
+              const gamma = prompt('Gamma (0.1-10, 1=no change):', '1');
+              if (gamma === null) return;
+              runFilter('Levels', (ctx, w, h) => applyLevels(ctx, w, h, parseFloat(black) || 0, parseFloat(white) || 255, parseFloat(gamma) || 1));
+            }}>
+              <span>Levels...</span><span></span>
+            </MenubarItem>
+            <MenubarItem className={itemClass} onClick={() => {
+              const rR = prompt('Red output from Red (0-200%):', '100');
+              if (rR === null) return;
+              const rG = prompt('Red output from Green (0-200%):', '0');
+              if (rG === null) return;
+              const rB = prompt('Red output from Blue (0-200%):', '0');
+              if (rB === null) return;
+              runFilter('Channel Mixer', (ctx, w, h) => applyChannelMixer(ctx, w, h, {
+                rOut: { r: parseFloat(rR) || 100, g: parseFloat(rG) || 0, b: parseFloat(rB) || 0 },
+                gOut: { r: 0, g: 100, b: 0 },
+                bOut: { r: 0, g: 0, b: 100 },
+              }));
+            }}>
+              <span>Channel Mixer...</span><span></span>
+            </MenubarItem>
+            <MenubarItem className={itemClass} onClick={() => {
+              const s = prompt('HDR strength (0-100):', '50');
+              if (s === null) return;
+              const r = prompt('HDR radius (1-20):', '8');
+              if (r === null) return;
+              runFilter('HDR Toning', (ctx, w, h) => applyHDRToning(ctx, w, h, parseFloat(s) || 50, parseFloat(r) || 8));
+            }}>
+              <span>HDR Toning...</span><span></span>
             </MenubarItem>
           </MenubarContent>
         </MenubarMenu>
@@ -472,6 +599,61 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
             }} disabled={!activeLayerId}>
               <span>Rename Layer...</span><span></span>
             </MenubarItem>
+            {/* Layer Mask submenu */}
+            <MenubarSub>
+              <MenubarSubTrigger className="cursor-pointer hover:editor-accent-bg hover:text-white data-[highlighted]:editor-accent-bg data-[highlighted]:text-white">
+                Layer Mask
+              </MenubarSubTrigger>
+              <MenubarSubContent className="editor-surface editor-border editor-text min-w-[200px]">
+                <MenubarItem className={itemClass} onClick={() => {
+                  if (activeLayerId) {
+                    store.addLayerMask(activeLayerId);
+                    pushHistory('Add Layer Mask');
+                    toast.success('Layer mask added (from selection if present)');
+                  }
+                }} disabled={!activeLayerId}>
+                  <span>Add Layer Mask</span><span></span>
+                </MenubarItem>
+                <MenubarItem className={itemClass} onClick={() => {
+                  if (activeLayerId) {
+                    store.toggleLayerMask(activeLayerId);
+                    pushHistory('Toggle Layer Mask');
+                  }
+                }} disabled={!activeLayerId}>
+                  <span>Toggle Mask</span><span></span>
+                </MenubarItem>
+                <MenubarItem className={itemClass} onClick={() => {
+                  if (activeLayerId) {
+                    store.removeLayerMask(activeLayerId);
+                    pushHistory('Remove Layer Mask');
+                  }
+                }} disabled={!activeLayerId}>
+                  <span>Remove Layer Mask</span><span></span>
+                </MenubarItem>
+                <MenubarSeparator className="editor-border" />
+                <MenubarItem className={itemClass} onClick={() => {
+                  if (activeLayerId) {
+                    const layer = layers.find((l) => l.id === activeLayerId);
+                    if (layer?.maskCanvas) {
+                      // Invert mask
+                      const mctx = layer.maskCanvas.getContext('2d', { willReadFrequently: true })!;
+                      const imageData = mctx.getImageData(0, 0, layer.maskCanvas.width, layer.maskCanvas.height);
+                      const data = imageData.data;
+                      for (let i = 0; i < data.length; i += 4) {
+                        data[i] = 255 - data[i];
+                        data[i + 1] = 255 - data[i + 1];
+                        data[i + 2] = 255 - data[i + 2];
+                      }
+                      mctx.putImageData(imageData, 0, 0);
+                      pushHistory('Invert Mask');
+                      toast.success('Mask inverted');
+                    }
+                  }
+                }} disabled={!activeLayerId || !layers.find((l) => l.id === activeLayerId)?.maskCanvas}>
+                  <span>Invert Mask</span><span></span>
+                </MenubarItem>
+              </MenubarSubContent>
+            </MenubarSub>
             {/* Layer Effects submenu */}
             <MenubarSub>
               <MenubarSubTrigger className="cursor-pointer hover:editor-accent-bg hover:text-white data-[highlighted]:editor-accent-bg data-[highlighted]:text-white">
@@ -720,6 +902,29 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
             </MenubarItem>
             <MenubarItem className={itemClass} onClick={() => setZoom(1)}>
               <span>Actual Size (100%)</span><span></span>
+            </MenubarItem>
+            <MenubarSeparator className="editor-border" />
+            <MenubarItem className={itemClass} onClick={() => store.toggleRulers()}>
+              <span>Show Rulers</span><span className="text-xs editor-text-dim">{store.showRulers ? '✓' : ''}</span>
+            </MenubarItem>
+            <MenubarItem className={itemClass} onClick={() => store.toggleGrid()}>
+              <span>Show Grid</span><span className="text-xs editor-text-dim">{store.showGrid ? '✓' : ''}</span>
+            </MenubarItem>
+            <MenubarItem className={itemClass} onClick={() => store.toggleSnapToGuides()}>
+              <span>Snap to Guides</span><span className="text-xs editor-text-dim">{store.snapToGuides ? '✓' : ''}</span>
+            </MenubarItem>
+            <MenubarSeparator className="editor-border" />
+            <MenubarItem className={itemClass} onClick={() => {
+              const pos = prompt('Guide position (px from top for horizontal, from left for vertical):', '100');
+              if (pos === null) return;
+              const orientation = prompt('Orientation (h or v):', 'h');
+              if (orientation === null) return;
+              store.addGuide(orientation.toLowerCase() === 'h' ? 'h' : 'v', parseFloat(pos) || 0);
+            }}>
+              <span>New Guide...</span><span></span>
+            </MenubarItem>
+            <MenubarItem className={itemClass} onClick={() => store.clearGuides()}>
+              <span>Clear Guides</span><span></span>
             </MenubarItem>
           </MenubarContent>
         </MenubarMenu>

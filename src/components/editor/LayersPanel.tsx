@@ -12,6 +12,8 @@ import {
   Lock,
   Unlock,
   ImageIcon,
+  CircleSlash,
+  Square,
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Slider } from '@/components/ui/slider';
@@ -226,6 +228,35 @@ export function LayersPanel() {
               </button>
             </TooltipTrigger>
             <TooltipContent side="top" className="text-xs">Merge Down</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => {
+                  if (activeLayerId) {
+                    const layer = layers.find((l) => l.id === activeLayerId);
+                    if (layer?.maskCanvas) {
+                      // Toggle mask
+                      useEditorStore.getState().toggleLayerMask(activeLayerId);
+                    } else {
+                      useEditorStore.getState().addLayerMask(activeLayerId);
+                    }
+                    pushHistory('Layer Mask');
+                  }
+                }}
+                disabled={!activeLayerId}
+                className={cn(
+                  'p-1.5 rounded hover:editor-surface-2 editor-text disabled:opacity-40',
+                  layers.find((l) => l.id === activeLayerId)?.maskCanvas && 'editor-accent'
+                )}
+              >
+                {layers.find((l) => l.id === activeLayerId)?.maskCanvas
+                  ? <Square size={16} />
+                  : <CircleSlash size={16} />}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">Add/Toggle Layer Mask</TooltipContent>
           </Tooltip>
 
           <div className="flex-1" />
