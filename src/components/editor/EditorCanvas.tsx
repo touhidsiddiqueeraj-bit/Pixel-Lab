@@ -1619,7 +1619,10 @@ export function EditorCanvas() {
         else if ((e.key === 'y') || (e.key === 'z' && e.shiftKey)) { e.preventDefault(); useEditorStore.getState().redo(); }
         else if (e.key === 'a') { e.preventDefault(); useEditorStore.getState().selectAll(); }
         else if (e.key === 'd') { e.preventDefault(); useEditorStore.getState().clearSelection(); }
-        else if (e.key === 's') { e.preventDefault(); toast.info('Use File menu to export'); }
+        else if (e.key === 's') { e.preventDefault(); toast.info('Use the Export button in the title bar'); }
+        else if (e.key === 'c') { e.preventDefault(); useEditorStore.getState().copySelection(); }
+        else if (e.key === 'v') { e.preventDefault(); useEditorStore.getState().pasteAsNewLayer(); }
+        else if (e.key === 'a' && e.shiftKey) { e.preventDefault(); useEditorStore.getState().selectAll(); }
         else if (e.key === '+' || e.key === '=') { e.preventDefault(); setZoom(zoom * 1.25); }
         else if (e.key === '-') { e.preventDefault(); setZoom(zoom / 1.25); }
         else if (e.key === '0') { e.preventDefault(); setZoom(1); }

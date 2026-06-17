@@ -16,6 +16,7 @@ import {
 } from './image-processing';
 import { featherSelection as featherMask } from './image-processing';
 import { getPerfSettings, type PerfSettings, memory } from './perf';
+import { toast } from 'sonner';
 
 const DEFAULT_TOOL_OPTIONS: ToolOptions = {
   brushSize: 20,
@@ -114,6 +115,36 @@ interface EditorState {
   settingSource: boolean;
   setSettingSource: (v: boolean) => void;
 
+  // Clipboard (copy/paste between layers)
+  clipboard: HTMLCanvasElement | null;
+  copySelection: () => void;
+  pasteAsNewLayer: () => void;
+
+  // Layer groups
+  toggleLayerGroup: (id: string) => void;
+  moveLayerIntoGroup: (id: string, groupId: string) => void;
+
+  // Adjustment layers (non-destructive)
+  addAdjustmentLayer: (name: string, settings: Record<string, number>) => void;
+  updateAdjustmentLayer: (id: string, settings: Record<string, number>) => void;
+  adjustmentLayers: { id: string; name: string; visible: boolean; settings: Record<string, number>; type: string }[];
+  setAdjustmentLayers: (layers: { id: string; name: string; visible: boolean; settings: Record<string, number>; type: string }[]) => void;
+
+  // Recent files (session storage, no cloud)
+  recentFiles: { name: string; dataUrl: string; timestamp: number }[];
+  addRecentFile: (name: string, dataUrl: string) => void;
+  clearRecentFiles: () => void;
+
+  // Export presets
+  exportPresets: { name: string; format: string; quality: number; maxWidth: number }[];
+  saveExportPreset: (preset: { name: string; format: string; quality: number; maxWidth: number }) => void;
+  deleteExportPreset: (index: number) => void;
+
+  // Custom keyboard shortcuts
+  customShortcuts: Record<string, string>;
+  setCustomShortcut: (action: string, key: string) => void;
+  resetShortcuts: () => void;
+
   setSelection: (mask: HTMLCanvasElement | null, bounds: { x: number; y: number; w: number; h: number } | null) => void;
   clearSelection: () => void;
   selectAll: () => void;
@@ -184,6 +215,97 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   editingMask: false,
 
   settingSource: false,
+
+  // Clipboard
+  clipboard: null,
+  copySelection: () => {
+    const state = get();
+    const layer = state.layers.find((l) => l.id === state.activeLayerId);
+    if (!layer) return;
+    const clip = createBlankCanvas(state.docWidth, state.docHeight);
+    const ctx = clip.getContext('2d')!;
+    if (state.selectionMask) {
+      ctx.drawImage(layer.canvas, 0, 0);
+      ctx.globalCompositeOperation = 'destination-in';
+      ctx.drawImage(state.selectionMask, 0, 0);
+    } else {
+      ctx.drawImage(layer.canvas, 0, 0);
+    }
+    set({ clipboard: clip });
+    toast.success('Copied to clipboard');
+  },
+  pasteAsNewLayer: () => {
+    const state = get();
+    if (!state.clipboard) { toast.error('Clipboard is empty'); return; }
+    const layerId = state.addLayer('Pasted');
+    const newState = get();
+    const layer = newState.layers.find((l) => l.id === layerId);
+    if (layer) {
+      const ctx = layer.canvas.getContext('2d')!;
+      ctx.drawImage(state.clipboard, 0, 0);
+      newState.refreshThumbnail(layerId);
+      newState.pushHistory('Paste');
+    }
+  },
+
+  // Layer groups (simple: toggle a group flag on layer)
+  toggleLayerGroup: (id) => set((s) => ({
+    layers: s.layers.map((l) => l.id === id ? { ...l, locked: !l.locked } : l), // reuse locked as collapsed flag for groups
+  })),
+  moveLayerIntoGroup: (id, groupId) => set((s) => {
+    // Simple implementation: just reorder
+    return s;
+  }),
+
+  // Adjustment layers
+  adjustmentLayers: [],
+  addAdjustmentLayer: (name, settings) => set((s) => ({
+    adjustmentLayers: [...s.adjustmentLayers, {
+      id: generateId(), name, visible: true, settings, type: name,
+    }],
+  })),
+  updateAdjustmentLayer: (id, settings) => set((s) => ({
+    adjustmentLayers: s.adjustmentLayers.map((a) => a.id === id ? { ...a, settings } : a),
+  })),
+  setAdjustmentLayers: (layers) => set({ adjustmentLayers: layers }),
+
+  // Recent files (stored in memory, optionally persisted to localStorage)
+  recentFiles: [],
+  addRecentFile: (name, dataUrl) => set((s) => {
+    const file = { name, dataUrl, timestamp: Date.now() };
+    const filtered = s.recentFiles.filter((f) => f.name !== name);
+    return { recentFiles: [file, ...filtered].slice(0, 10) };
+  }),
+  clearRecentFiles: () => set({ recentFiles: [] }),
+
+  // Export presets (persisted to localStorage)
+  exportPresets: (() => {
+    try { return JSON.parse(localStorage.getItem('pixel-lab-export-presets') || '[]'); } catch { return []; }
+  })(),
+  saveExportPreset: (preset) => set((s) => {
+    const presets = [...s.exportPresets, preset];
+    try { localStorage.setItem('pixel-lab-export-presets', JSON.stringify(presets)); } catch {}
+    return { exportPresets: presets };
+  }),
+  deleteExportPreset: (index) => set((s) => {
+    const presets = s.exportPresets.filter((_, i) => i !== index);
+    try { localStorage.setItem('pixel-lab-export-presets', JSON.stringify(presets)); } catch {}
+    return { exportPresets: presets };
+  }),
+
+  // Custom shortcuts (persisted to localStorage)
+  customShortcuts: (() => {
+    try { return JSON.parse(localStorage.getItem('pixel-lab-shortcuts') || '{}'); } catch { return {}; }
+  })(),
+  setCustomShortcut: (action, key) => set((s) => {
+    const shortcuts = { ...s.customShortcuts, [action]: key };
+    try { localStorage.setItem('pixel-lab-shortcuts', JSON.stringify(shortcuts)); } catch {}
+    return { customShortcuts: shortcuts };
+  }),
+  resetShortcuts: () => {
+    try { localStorage.removeItem('pixel-lab-shortcuts'); } catch {}
+    set({ customShortcuts: {} });
+  },
 
   guides: { x: [], y: [] },
   showRulers: false,

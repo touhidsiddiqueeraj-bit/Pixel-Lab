@@ -26,7 +26,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
-import { Layers, History, Palette, SlidersHorizontal, Menu, PanelRight, Spline, Compass, Sun, Brush, Image as ImageIcon, Download } from 'lucide-react';
+import { Layers, History, Palette, SlidersHorizontal, Menu, PanelRight, Spline, Compass, Sun, Brush, Image as ImageIcon, Download, Upload, Clipboard, Grid as GridIcon, Wand2, Film, Keyboard, AlignLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -118,7 +118,35 @@ export function PhotoEditor() {
   );
 
   return (
-    <div className="flex flex-col h-[100dvh] w-screen editor-bg editor-text overflow-hidden">
+    <div
+      className="flex flex-col h-[100dvh] w-screen editor-bg editor-text overflow-hidden"
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+      onDrop={(e) => {
+        e.preventDefault();
+        const file = e.dataTransfer.files?.[0];
+        if (!file || !file.type.startsWith('image/')) return;
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+          const state = useEditorStore.getState();
+          state.newDocument(img.naturalWidth, img.naturalHeight, '#ffffff');
+          setTimeout(() => {
+            const layerId = state.addLayer(file.name.replace(/\.[^/.]+$/, ''));
+            const newState = useEditorStore.getState();
+            const layer = newState.layers.find((l) => l.id === layerId);
+            if (layer) {
+              const ctx = layer.canvas.getContext('2d')!;
+              ctx.drawImage(img, 0, 0);
+              newState.refreshThumbnail(layerId);
+              newState.pushHistory('Drag & Drop Import');
+              newState.addRecentFile(file.name, layer.canvas.toDataURL('image/jpeg', 0.7));
+            }
+            URL.revokeObjectURL(url);
+          }, 100);
+        };
+        img.src = url;
+      }}
+    >
       <HiddenColorInputs />
 
       {/* Compact title bar */}

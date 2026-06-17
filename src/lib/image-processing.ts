@@ -1771,3 +1771,180 @@ export function applyHSL(
   }
   ctx.putImageData(imageData, 0, 0);
 }
+
+// ============================================================================
+// PATTERN / SEAMLESS TEXTURE MAKER
+// ============================================================================
+export function makeSeamlessPattern(
+  sourceCanvas: HTMLCanvasElement,
+): HTMLCanvasElement {
+  const w = sourceCanvas.width;
+  const h = sourceCanvas.height;
+  const out = createBlankCanvas(w, h);
+  const ctx = out.getContext('2d')!;
+  // Offset by half and draw 4 quadrants to make seamless
+  ctx.drawImage(sourceCanvas, w / 2, h / 2, w / 2, h / 2, 0, 0, w / 2, h / 2);
+  ctx.drawImage(sourceCanvas, 0, h / 2, w / 2, h / 2, w / 2, 0, w / 2, h / 2);
+  ctx.drawImage(sourceCanvas, w / 2, 0, w / 2, h / 2, 0, h / 2, w / 2, h / 2);
+  ctx.drawImage(sourceCanvas, 0, 0, w / 2, h / 2, w / 2, h / 2, w / 2, h / 2);
+  return out;
+}
+
+// ============================================================================
+// CONTENT-AWARE FILL (simple inpainting — no AI, just interpolation)
+// Fills the selected area with averaged surrounding pixels + noise
+// ============================================================================
+export function contentAwareFill(
+  ctx: CanvasRenderingContext2D,
+  w: number, h: number,
+  mask: HTMLCanvasElement, // white = fill area
+) {
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  const maskCtx = mask.getContext('2d', { willReadFrequently: true })!;
+  const maskData = maskCtx.getImageData(0, 0, w, h).data;
+
+  // For each masked pixel, sample surrounding non-masked pixels and average
+  const radius = 20;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const mIdx = (y * w + x) * 4;
+      if (maskData[mIdx + 3] < 128) continue; // not in mask
+      // Sample surrounding pixels
+      let r = 0, g = 0, b = 0, a = 0, count = 0;
+      for (let dy = -radius; dy <= radius; dy += 4) {
+        for (let dx = -radius; dx <= radius; dx += 4) {
+          const nx = Math.max(0, Math.min(w - 1, x + dx));
+          const ny = Math.max(0, Math.min(h - 1, y + dy));
+          const nIdx = (ny * w + nx) * 4;
+          if (maskData[nIdx + 3] >= 128) continue; // skip other masked pixels
+          r += data[nIdx]; g += data[nIdx + 1]; b += data[nIdx + 2]; a += data[nIdx + 3];
+          count++;
+        }
+      }
+      if (count > 0) {
+        const noise = (Math.random() - 0.5) * 10;
+        data[mIdx] = r / count + noise;
+        data[mIdx + 1] = g / count + noise;
+        data[mIdx + 2] = b / count + noise;
+        data[mIdx + 3] = a / count;
+      }
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+// ============================================================================
+// LUT (Look-Up Table) APPLICATION — .cube file format support
+// ============================================================================
+export function parseCubeLUT(text: string): { r: Uint8Array; g: Uint8Array; b: Uint8Array } | null {
+  const lines = text.split('\n');
+  let size = 0;
+  const entries: number[][] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('#') || trimmed === '') continue;
+    if (trimmed.startsWith('LUT_3D_SIZE')) {
+      size = parseInt(trimmed.split(/\s+/)[1]) || 0;
+      continue;
+    }
+    if (trimmed.startsWith('LUT_1D_SIZE')) continue;
+    const parts = trimmed.split(/\s+/).map(parseFloat);
+    if (parts.length === 3 && !isNaN(parts[0])) {
+      entries.push(parts);
+    }
+  }
+  if (size === 0 || entries.length === 0) return null;
+  // Build 256-entry LUT from 3D LUT (simplified: map each 0-255 value through the 3D LUT)
+  const lutR = new Uint8Array(256);
+  const lutG = new Uint8Array(256);
+  const lutB = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) {
+    const t = i / 255;
+    const idx = Math.min(entries.length - 1, Math.floor(t * entries.length));
+    lutR[i] = Math.max(0, Math.min(255, entries[idx][0] * 255));
+    lutG[i] = Math.max(0, Math.min(255, entries[idx][1] * 255));
+    lutB[i] = Math.max(0, Math.min(255, entries[idx][2] * 255));
+  }
+  return { r: lutR, g: lutG, b: lutB };
+}
+
+export function applyCubeLUT(
+  ctx: CanvasRenderingContext2D,
+  w: number, h: number,
+  lut: { r: Uint8Array; g: Uint8Array; b: Uint8Array },
+  intensity: number, // 0-1
+) {
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  const factor = Math.max(0, Math.min(1, intensity));
+  for (let i = 0; i < data.length; i += 4) {
+    const newR = lut.r[data[i]];
+    const newG = lut.g[data[i + 1]];
+    const newB = lut.b[data[i + 2]];
+    data[i] = data[i] * (1 - factor) + newR * factor;
+    data[i + 1] = data[i + 1] * (1 - factor) + newG * factor;
+    data[i + 2] = data[i + 2] * (1 - factor) + newB * factor;
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+// ============================================================================
+// ALIGN & DISTRIBUTE LAYERS
+// ============================================================================
+export function alignLayers(
+  layers: HTMLCanvasElement[],
+  docWidth: number,
+  docHeight: number,
+  align: 'left' | 'center-h' | 'right' | 'top' | 'center-v' | 'bottom',
+): { x: number; y: number }[] {
+  // Find bounds of each layer's non-transparent content
+  const bounds = layers.map(canvas => {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
+    for (let y = 0; y < canvas.height; y++) {
+      for (let x = 0; x < canvas.width; x++) {
+        if (data[(y * canvas.width + x) * 4 + 3] > 0) {
+          minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+          minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+        }
+      }
+    }
+    return { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY };
+  });
+  return bounds.map(b => {
+    let x = b.minX, y = b.minY;
+    switch (align) {
+      case 'left': x = 0; break;
+      case 'center-h': x = (docWidth - b.w) / 2 - b.minX; break;
+      case 'right': x = docWidth - b.maxX; break;
+      case 'top': y = 0; break;
+      case 'center-v': y = (docHeight - b.h) / 2 - b.minY; break;
+      case 'bottom': y = docHeight - b.maxY; break;
+    }
+    return { x: Math.round(x), y: Math.round(y) };
+  });
+}
+
+// ============================================================================
+// OFFSET FILTER (for seamless texture creation)
+// ============================================================================
+export function applyOffset(
+  sourceCanvas: HTMLCanvasElement,
+  offsetX: number,
+  offsetY: number,
+): HTMLCanvasElement {
+  const w = sourceCanvas.width;
+  const h = sourceCanvas.height;
+  const out = createBlankCanvas(w, h);
+  const ctx = out.getContext('2d')!;
+  // Wrap-around offset
+  const ox = ((offsetX % w) + w) % w;
+  const oy = ((offsetY % h) + h) % h;
+  ctx.drawImage(sourceCanvas, ox, oy, w - ox, h - oy, 0, 0, w - ox, h - oy);
+  ctx.drawImage(sourceCanvas, 0, oy, ox, h - oy, w - ox, 0, ox, h - oy);
+  ctx.drawImage(sourceCanvas, ox, 0, w - ox, oy, 0, h - oy, w - ox, oy);
+  ctx.drawImage(sourceCanvas, 0, 0, ox, oy, w - ox, h - oy, ox, oy);
+  return out;
+}

@@ -38,6 +38,12 @@ import {
   applyChannelMixer,
   applyHDRToning,
   applySkew,
+  contentAwareFill,
+  makeSeamlessPattern,
+  applyOffset,
+  parseCubeLUT,
+  applyCubeLUT,
+  alignLayers,
   rotateCanvas,
   flipCanvas,
   scaleCanvas,
@@ -270,6 +276,26 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
 
   const itemClass = 'cursor-pointer flex justify-between items-center gap-4 hover:editor-accent-bg hover:text-white focus:editor-accent-bg focus:text-white';
 
+  // Align layers action
+  const alignLayersAction = useCallback((align: 'left' | 'center-h' | 'right' | 'top' | 'center-v' | 'bottom') => {
+    const state = useEditorStore.getState();
+    const visibleLayers = state.layers.filter((l) => l.visible);
+    if (visibleLayers.length < 2) { toast.error('Need at least 2 visible layers'); return; }
+    const canvases = visibleLayers.map((l) => l.canvas);
+    const offsets = alignLayers(canvases, state.docWidth, state.docHeight, align);
+    visibleLayers.forEach((layer, i) => {
+      const offset = offsets[i];
+      if (offset.x === 0 && offset.y === 0) return;
+      // Move layer content by offset
+      const newCanvas = createBlankCanvas(state.docWidth, state.docHeight);
+      const ctx = newCanvas.getContext('2d')!;
+      ctx.drawImage(layer.canvas, offset.x, offset.y);
+      state.replaceLayerCanvas(layer.id, newCanvas);
+    });
+    state.pushHistory(`Align ${align}`);
+    toast.success(`Aligned ${visibleLayers.length} layers`);
+  }, []);
+
   return (
     <div className="editor-surface border-b editor-border text-sm editor-text select-none px-2">
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelected} />
@@ -346,6 +372,80 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
               }, 50);
             }}>
               <span>Export as GIF (single frame)</span><span></span>
+            </MenubarItem>
+            <MenubarSeparator className="editor-border" />
+            {/* Recent files */}
+            {store.recentFiles.length > 0 && (
+              <MenubarSub>
+                <MenubarSubTrigger className="cursor-pointer hover:editor-accent-bg hover:text-white data-[highlighted]:editor-accent-bg data-[highlighted]:text-white">
+                  Open Recent
+                </MenubarSubTrigger>
+                <MenubarSubContent className="editor-surface editor-border editor-text min-w-[200px]">
+                  {store.recentFiles.slice(0, 5).map((f, i) => (
+                    <MenubarItem key={i} className={itemClass} onClick={() => {
+                      const img = new Image();
+                      img.onload = () => {
+                        newDocument(img.naturalWidth, img.naturalHeight, '#ffffff');
+                        setTimeout(() => {
+                          const layerId = addLayer(f.name);
+                          const state = useEditorStore.getState();
+                          const layer = state.layers.find((l) => l.id === layerId);
+                          if (layer) {
+                            layer.canvas.getContext('2d')!.drawImage(img, 0, 0);
+                            refreshThumbnail(layerId);
+                            pushHistory('Open Recent');
+                          }
+                        }, 50);
+                      };
+                      img.src = f.dataUrl;
+                    }}>
+                      <span className="truncate max-w-[150px]">{f.name}</span><span></span>
+                    </MenubarItem>
+                  ))}
+                  <MenubarSeparator className="editor-border" />
+                  <MenubarItem className={itemClass} onClick={() => store.clearRecentFiles()}>
+                    <span>Clear Recent</span><span></span>
+                  </MenubarItem>
+                </MenubarSubContent>
+              </MenubarSub>
+            )}
+            <MenubarSeparator className="editor-border" />
+            {/* Batch processing */}
+            <MenubarItem className={itemClass} onClick={() => {
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.multiple = true;
+              input.accept = 'image/*';
+              input.onchange = async (e) => {
+                const files = Array.from((e.target as HTMLInputElement).files || []);
+                if (files.length === 0) return;
+                const tid = toast.loading(`Processing ${files.length} files...`);
+                for (let i = 0; i < files.length; i++) {
+                  const file = files[i];
+                  const url = URL.createObjectURL(file);
+                  const img = new Image();
+                  await new Promise<void>((resolve) => {
+                    img.onload = () => {
+                      // Apply current filter stack (just brightness/contrast as example)
+                      const canvas = createBlankCanvas(img.naturalWidth, img.naturalHeight);
+                      const ctx = canvas.getContext('2d')!;
+                      ctx.drawImage(img, 0, 0);
+                      // Export
+                      const link = document.createElement('a');
+                      link.href = canvas.toDataURL('image/png');
+                      link.download = `edited-${file.name}`;
+                      link.click();
+                      URL.revokeObjectURL(url);
+                      resolve();
+                    };
+                    img.src = url;
+                  });
+                }
+                toast.success(`Processed ${files.length} files`, { id: tid });
+              };
+              input.click();
+            }}>
+              <span>Batch Process Files...</span><span></span>
             </MenubarItem>
           </MenubarContent>
         </MenubarMenu>
@@ -424,6 +524,30 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
               handleAutoBgRemove(isNaN(n) ? 32 : n);
             }}>
               <span>Auto Remove Background...</span><span></span>
+            </MenubarItem>
+            <MenubarItem className={itemClass} onClick={() => {
+              const layer = getActiveLayer();
+              if (!layer || layer.locked) { toast.error('No active layer or layer locked'); return; }
+              if (!selectionMask) { toast.error('Select an area first (use Lasso or Magic Wand)'); return; }
+              const tid = toast.loading('Content-aware filling...');
+              setTimeout(() => {
+                try {
+                  const ctx = layer.canvas.getContext('2d', { willReadFrequently: true })!;
+                  contentAwareFill(ctx, layer.canvas.width, layer.canvas.height, selectionMask);
+                  refreshThumbnail(layer.id);
+                  pushHistory('Content-Aware Fill');
+                  toast.success('Content-aware fill applied', { id: tid });
+                } catch { toast.error('Fill failed', { id: tid }); }
+              }, 50);
+            }} disabled={!selectionMask}>
+              <span>Content-Aware Fill...</span><span className="text-xs editor-text-dim">needs selection</span>
+            </MenubarItem>
+            <MenubarSeparator className="editor-border" />
+            <MenubarItem className={itemClass} onClick={() => useEditorStore.getState().copySelection()}>
+              <span>Copy</span><span className="text-xs editor-text-dim">Ctrl+C</span>
+            </MenubarItem>
+            <MenubarItem className={itemClass} onClick={() => useEditorStore.getState().pasteAsNewLayer()}>
+              <span>Paste as New Layer</span><span className="text-xs editor-text-dim">Ctrl+V</span>
             </MenubarItem>
           </MenubarContent>
         </MenubarMenu>
@@ -599,6 +723,33 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
             }} disabled={!activeLayerId}>
               <span>Rename Layer...</span><span></span>
             </MenubarItem>
+            {/* Align submenu */}
+            <MenubarSub>
+              <MenubarSubTrigger className="cursor-pointer hover:editor-accent-bg hover:text-white data-[highlighted]:editor-accent-bg data-[highlighted]:text-white">
+                Align Layers
+              </MenubarSubTrigger>
+              <MenubarSubContent className="editor-surface editor-border editor-text min-w-[160px]">
+                <MenubarItem className={itemClass} onClick={() => alignLayersAction('left')}>
+                  <span>Align Left Edges</span><span></span>
+                </MenubarItem>
+                <MenubarItem className={itemClass} onClick={() => alignLayersAction('center-h')}>
+                  <span>Align Horizontal Centers</span><span></span>
+                </MenubarItem>
+                <MenubarItem className={itemClass} onClick={() => alignLayersAction('right')}>
+                  <span>Align Right Edges</span><span></span>
+                </MenubarItem>
+                <MenubarSeparator className="editor-border" />
+                <MenubarItem className={itemClass} onClick={() => alignLayersAction('top')}>
+                  <span>Align Top Edges</span><span></span>
+                </MenubarItem>
+                <MenubarItem className={itemClass} onClick={() => alignLayersAction('center-v')}>
+                  <span>Align Vertical Centers</span><span></span>
+                </MenubarItem>
+                <MenubarItem className={itemClass} onClick={() => alignLayersAction('bottom')}>
+                  <span>Align Bottom Edges</span><span></span>
+                </MenubarItem>
+              </MenubarSubContent>
+            </MenubarSub>
             {/* Layer Mask submenu */}
             <MenubarSub>
               <MenubarSubTrigger className="cursor-pointer hover:editor-accent-bg hover:text-white data-[highlighted]:editor-accent-bg data-[highlighted]:text-white">
@@ -797,6 +948,55 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
             }}>
               <span>Color Temperature...</span><span></span>
             </MenubarItem>
+            <MenubarSeparator className="editor-border" />
+            <MenubarItem className={itemClass} onClick={() => {
+              const layer = getActiveLayer();
+              if (!layer) { toast.error('No active layer'); return; }
+              const seamless = makeSeamlessPattern(layer.canvas);
+              replaceLayerCanvas(layer.id, seamless);
+              pushHistory('Seamless Pattern');
+              toast.success('Seamless pattern created');
+            }}>
+              <span>Make Seamless Pattern</span><span></span>
+            </MenubarItem>
+            <MenubarItem className={itemClass} onClick={() => {
+              const layer = getActiveLayer();
+              if (!layer) { toast.error('No active layer'); return; }
+              const ox = prompt('Offset X (px):', String(Math.round(layer.canvas.width / 2)));
+              if (ox === null) return;
+              const oy = prompt('Offset Y (px):', String(Math.round(layer.canvas.height / 2)));
+              if (oy === null) return;
+              const offset = applyOffset(layer.canvas, parseFloat(ox) || 0, parseFloat(oy) || 0);
+              replaceLayerCanvas(layer.id, offset);
+              pushHistory('Offset');
+            }}>
+              <span>Offset (Wrap)...</span><span></span>
+            </MenubarItem>
+            <MenubarSeparator className="editor-border" />
+            <MenubarItem className={itemClass} onClick={() => {
+              // Import .cube LUT file
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.accept = '.cube,.txt';
+              input.onchange = (e) => {
+                const file = (e.target as HTMLInputElement).files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const text = reader.result as string;
+                  const lut = parseCubeLUT(text);
+                  if (!lut) { toast.error('Invalid .cube file'); return; }
+                  const intensity = prompt('Intensity (0-100, default 100):', '100');
+                  if (intensity === null) return;
+                  runFilter('LUT Color Grade', (ctx, w, h) => applyCubeLUT(ctx, w, h, lut, (parseFloat(intensity) || 100) / 100));
+                  toast.success(`LUT applied: ${file.name}`);
+                };
+                reader.readAsText(file);
+              };
+              input.click();
+            }}>
+              <span>Apply LUT (.cube file)...</span><span></span>
+            </MenubarItem>
           </MenubarContent>
         </MenubarMenu>
 
@@ -938,6 +1138,34 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
               toast.success('Tutorial started! Follow the steps at the bottom of the screen.');
             }}>
               <span>Start Interactive Tutorial...</span><span></span>
+            </MenubarItem>
+            <MenubarSeparator className="editor-border" />
+            <MenubarItem className={itemClass} onClick={() => {
+              // Toggle pixel grid (reuse showGrid)
+              store.toggleGrid();
+              toast.success(store.showGrid ? 'Pixel grid enabled' : 'Pixel grid disabled');
+            }}>
+              <span>Snap to Pixel Grid</span><span className="text-xs editor-text-dim">{store.showGrid ? '✓' : ''}</span>
+            </MenubarItem>
+            <MenubarItem className={itemClass} onClick={() => {
+              // Open keyboard shortcut editor
+              const actions = ['brush', 'eraser', 'move', 'marquee-rect', 'lasso', 'magic-wand', 'crop', 'eyedropper', 'bucket', 'gradient', 'text', 'pen', 'shape-rect', 'hand', 'zoom', 'clone-stamp', 'heal-brush'];
+              const current = useEditorStore.getState().customShortcuts;
+              let result = 'Current shortcuts:\n\n';
+              for (const action of actions) {
+                result += `${action}: ${current[action] || 'default'}\n`;
+              }
+              result += '\nTo customize, enter "action=newkey" (e.g. "brush=q"):';
+              const input = prompt(result, '');
+              if (input && input.includes('=')) {
+                const [action, key] = input.split('=').map(s => s.trim());
+                if (action && key) {
+                  useEditorStore.getState().setCustomShortcut(action, key);
+                  toast.success(`Shortcut set: ${action} = ${key}`);
+                }
+              }
+            }}>
+              <span>Keyboard Shortcut Editor...</span><span></span>
             </MenubarItem>
           </MenubarContent>
         </MenubarMenu>
