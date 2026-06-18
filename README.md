@@ -9,6 +9,7 @@
 </p>
 
 <p align="center">
+  <a href="https://pixel-lab-jade.vercel.app/" target="_blank">🚀 Live Demo</a> •
   <a href="#features">Features</a> •
   <a href="#screenshots">Screenshots</a> •
   <a href="#getting-started">Getting Started</a> •
@@ -172,7 +173,7 @@ A full photo development panel with 5 sections:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/pixel-lab.git
+git clone https://github.com/touhidsiddiqueeraj-bit/Pixel-Lab.git
 cd pixel-lab
 
 # Install dependencies (using bun recommended)
