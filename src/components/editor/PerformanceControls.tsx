@@ -20,10 +20,12 @@ export function PerformanceControls() {
   const [fps, setFps] = useState(0);
   const [tier, setTier] = useState<PerfTier>('medium');
   const [stats, setStats] = useState<Record<string, { avg: number; max: number; count: number }>>({});
+  const [cores, setCores] = useState<string>('?');
 
   // Detect device tier on mount
   useEffect(() => {
     setTier(detectPerfTier());
+    setCores(String(navigator.hardwareConcurrency || '?'));
     perf.enable();
   }, []);
 
@@ -95,7 +97,7 @@ export function PerformanceControls() {
               ))}
             </div>
             <p className="text-[10px] editor-text-dim">
-              Detected: {detectPerfTier()} · {navigator.hardwareConcurrency || '?'} cores
+              Detected: {tier} · {cores} cores
             </p>
           </div>
 
