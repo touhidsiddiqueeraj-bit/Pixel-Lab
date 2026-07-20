@@ -155,7 +155,7 @@ A Copilot-Chat-style panel that translates natural-language prompts into real ed
 
 | | |
 |---|---|
-| **16 agent tools** | Filters, develop adjustments, selection, drawing, text, bucket fill |
+| **21 agent tools** | Filters, develop adjustments, selection, drawing, text, bucket fill, canvas snapshot, recipe CRUD |
 | **Tool-calling loop** | Against Google's Gemini API (`gemini-flash-lite-latest` / `flash` / `pro`) |
 | **🆕 Vision self-evaluation** | After tool calls, a vision model reviews BEFORE/AFTER images and scores the edit 1–10. Scores below 7 trigger an automatic retry with feedback (up to 2 retries). You see fewer garbage results. |
 | **🆕 Preference memory** | Every Accept/Reject is recorded to `localStorage` and summarized into the system prompt on subsequent runs — Luna adapts to what you like (e.g. "user tends to reject over-brightened skies"). |
@@ -184,6 +184,11 @@ A Copilot-Chat-style panel that translates natural-language prompts into real ed
 | `addText` | Render text with font, size, color, alignment |
 | `fillBucket` | Paint-bucket flood-fill (any CSS color) |
 | `undo` | (No-op in preview — Reject is the real undo) |
+| `getCanvasSnapshot` | Returns current workspace composite as base64 JPEG + metadata (docWidth, docHeight, zoom, activeLayerId, layerCount) |
+| `saveRecipe` | Persist an automation recipe (name + step array) to the automations store |
+| `listRecipes` | List all saved recipes with step count and timestamps |
+| `runRecipe` | Execute all steps of a named recipe sequentially |
+| `deleteRecipe` | Remove a saved recipe by name |
 
 **Try prompts like:** *"make it grayscale"*, *"brighten the sky and add a vignette"*, *"draw a red circle in the center"*, *"fill the background blue"*, *"write Hello World in green at the top-left"*, *"remove the person in the corner"*.
 
@@ -448,13 +453,15 @@ pixel-lab/
 │   │   └── agent/              # Luna — AI assistant (Gemini-powered)
 │   │       ├── agent-store.ts  # Zustand slice — in-memory API key, chat thread, pending preview, self-eval result, preference memory (localStorage-persisted)
 │   │       ├── gemini-client.ts# Thin wrapper around Gemini generateContent with functionDeclarations + evaluateEditQuality (vision-based self-eval)
-│   │       ├── tools.ts        # 16-tool schema + executor wrapping existing editor functions
+│   │       ├── tools.ts        # 21-tool schema + executor wrapping existing editor functions
 │   │       └── agent-runner.ts # Orchestration loop — offscreen workspace, MAX_TOOL_CALLS, self-eval + retry, preference memory, commit/reject
+│   │   └── figma/              # Figma API import
+│   │       └── figma-import.ts # Figma file/frame API client (two endpoints, PAT auth)
 │   └── components/
 │       ├── ui/                 # shadcn/ui components
 │       └── editor/             # Editor components
 │           ├── PhotoEditor.tsx         # Main container (responsive layout)
-│           ├── EditorCanvas.tsx        # Canvas & tool implementations (~1800 lines)
+│   ├── EditorCanvas.tsx        # Canvas & tool implementations (~2100 lines)
 │           ├── Toolbar.tsx             # Left toolbar (desktop) / bottom toolbar (mobile)
 │           ├── OptionsBar.tsx          # Context tool options
 │           ├── MenuBar.tsx             # Top menu bar
@@ -462,7 +469,8 @@ pixel-lab/
 │           ├── AdjustmentsPanel.tsx    # Filters & adjustments
 │           ├── DevelopPanel.tsx        # Lightroom-style develop panel
 │           ├── ColorPanel.tsx          # Color picker
-│           ├── HistoryPanel.tsx        # Undo/redo history
+│   ├── HistoryPanel.tsx        # Undo/redo history
+│   ├── FigmaImportDialog.tsx   # Import frames from Figma (PAT auth, frame selector, progress)
 │           ├── NavigatorPanel.tsx      # Minimap & brush presets
 │           ├── AgentPanel.tsx          # Luna (Copilot-Chat-style UI + self-eval display + preference memory panel)
 │           ├── VectorizeDialog.tsx     # Vectorization dialog
@@ -509,12 +517,19 @@ pixel-lab/
 - **🆕 Mobile layout redesigned from scratch** — 2-row bottom toolbar (category strip + tool strip) with all 3 lasso variants as distinct buttons, sticky color swatches, integrated Panels + Luna buttons (no more floating overlap), 44px+ touch targets throughout
 - **🆕 Luna vision self-evaluation** — after tool calls, a vision model reviews BEFORE/AFTER and scores the edit 1–10. Scores <7 trigger automatic retry with feedback (up to 2 retries). Bad edits are caught before you see them.
 - **🆕 Luna preference memory** — Accept/Reject decisions are recorded to `localStorage` and summarized into the system prompt on subsequent runs. Luna adapts to your taste over time.
-- Luna with 16 tools (filters, develop, selection, drawing, text, bucket fill)
+- **🆕 Lasso overlay** — marching-squares contour trace replaces bounding-box `strokeRect` for lasso, polygonal lasso, magnetic lasso, and magic wand selection paths
+- **🆕 Move tool** — snapshots active layer on pointerdown, live offset redraw, commits with `pushHistory('Move')` on pointerup; selection bounds translate with content
+- **🆕 Canvas Snapshot MCP tool** — `getCanvasSnapshot` returns base64 JPEG + metadata via MCP image content block
+- **🆕 Recipe MCP tools** — `saveRecipe`, `listRecipes`, `runRecipe`, `deleteRecipe` for headless automation management
+- **🆕 Figma import** — File → Import from Figma with PAT auth, frame selector with thumbnails, progress bar
+- Luna with 21 tools (filters, develop, selection, drawing, text, bucket fill, canvas snapshot, recipe CRUD)
 - Offscreen workspace preview with Accept/Reject
 - 4 drawing tools (`drawShape`, `drawBrushStroke`, `addText`, `fillBucket`) accepting any CSS color
 
 ### Next up 🚧
 
+- **Multi-frame Figma import** — currently imports one frame at a time; batch frame import to layers is a natural extension
+- **Layer mapping on Figma import** — positional matching against existing layers could auto-place imported frames
 - **Per-step accept/reject** — currently the agent produces a single combined preview per turn (with self-eval retries happening transparently); a future config option could allow per-step review
 - **Persistent chat history** — chat is per-session only in v1 to avoid clutter; could be persisted to `localStorage` if desired
 - **Segmentation model (SAM)** for tighter selection masks — the existing Magic Wand tolerance/flood-fill is used as a bridge; a future `selectRegionBySegmentation` tool could plug in

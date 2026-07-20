@@ -505,7 +505,7 @@ Uses `next-themes` with `defaultTheme="system"` to auto-detect OS preference. Us
 | `perf.ts` | Performance utilities, device detection, RAF throttle, canvas pool, memory manager |
 | `agent/agent-store.ts` | Zustand slice for the AI agent — in-memory API key (never persisted), model preference (persisted), chat thread, pending preview, cancel token |
 | `agent/gemini-client.ts` | Thin wrapper around Gemini `generateContent` REST endpoint with `functionDeclarations`; sends canvas as 1024px JPEG inline part |
-| `agent/tools.ts` | 14-tool schema + executor wrapping existing editor functions (filters, develop, selection, drawing, text, bucket fill) |
+| `agent/tools.ts` | 21-tool schema + executor wrapping existing editor functions (filters, develop, selection, drawing, text, bucket fill, canvas snapshot, recipe CRUD) |
 | `agent/agent-runner.ts` | Orchestration loop — offscreen workspace snapshot, tool-call loop with progress events, MAX_TOOL_CALLS=8 hard stop, commit/reject |
 
 ### Components (`src/components/editor/`)
@@ -513,7 +513,7 @@ Uses `next-themes` with `defaultTheme="system"` to auto-detect OS preference. Us
 | Component | Responsibility |
 |-----------|---------------|
 | `PhotoEditor.tsx` | Main container, responsive layout, drag-and-drop import, mobile bottom toolbar |
-| `EditorCanvas.tsx` | Canvas rendering, 40 tool implementations, pointer capture, auto-fit zoom (~1800 lines) |
+| `EditorCanvas.tsx` | Canvas rendering, 40 tool implementations, pointer capture, auto-fit zoom (~2100 lines) |
 | `Toolbar.tsx` | Left tool buttons (desktop), 40 tools across 6 sections |
 | `OptionsBar.tsx` | Context-sensitive tool options with mobile-compact layout |
 | `MenuBar.tsx` | Top menu (File, Edit, Image, Layer, Filter, Vector, View) with 100+ menu items |
@@ -522,6 +522,7 @@ Uses `next-themes` with `defaultTheme="system"` to auto-detect OS preference. Us
 | `DevelopPanel.tsx` | Lightroom-style develop panel (Light, Color, Effects, Detail, Split Toning) |
 | `ColorPanel.tsx` | Color picker, swatches |
 | `HistoryPanel.tsx` | Undo/redo history |
+| `FigmaImportDialog.tsx` | Figma frame import — PAT auth, file key input, frame selector with thumbnails, progress bar |
 | `NavigatorPanel.tsx` | Minimap, brush presets |
 | `AgentPanel.tsx` | AI editing agent UI — Copilot-Chat-style chat thread, model picker, API key input, before/after preview with Accept/Reject, Stop button |
 | `VectorizeDialog.tsx` | Vectorization dialog with live preview |
@@ -989,9 +990,9 @@ The summary is intentionally short (3–8 lines) so it doesn't bloat the system 
 **Self-eval agreement rate:** The summary also reports how often the agent's self-eval score agreed with the user's decision (self-score ≥7 → predicted accept; <7 → predicted reject). This is a **calibration signal**: if the agreement rate drops, the self-eval prompt needs tuning. The user can see this stat in the preference memory panel (brain icon in the Luna header).
 
 
-### Tool Set (16 tools)
+### Tool Set (21 tools)
 
-Every tool wraps an existing function from `image-processing.ts`, `vector-shapes.ts`, or the editor-store's Magic Wand / Bucket Fill algorithms — **no filter logic is reimplemented**.
+Every tool wraps an existing function from `image-processing.ts`, `vector-shapes.ts`, the editor-store's Magic Wand / Bucket Fill algorithms, or the automations store — **no filter logic is reimplemented**.
 
 | Tool | Wraps | Notes |
 |---|---|---|
@@ -1008,6 +1009,11 @@ Every tool wraps an existing function from `image-processing.ts`, `vector-shapes
 | `addText` | Canvas 2D API | Multi-line via `\n` |
 | `fillBucket` | Scanline flood-fill (ported from `EditorCanvas.tsx`) | Accepts any CSS color |
 | `undo` | No-op in preview (Reject is the real undo) | |
+| `getCanvasSnapshot` | `compositeWorkspace` + `scaleCanvasToMax` | Base64 JPEG + doc metadata |
+| `saveRecipe` | `useAutomationsStore.addRecipe` | Persists automation step array |
+| `listRecipes` | `useAutomationsStore.recipes` | Returns all saved recipes |
+| `runRecipe` | Loops through recipe steps calling `executeTool` | Sequential step execution |
+| `deleteRecipe` | `useAutomationsStore.removeRecipe` | Removes recipe by name |
 
 ### Color Parsing
 
@@ -1063,7 +1069,7 @@ Note: `temperature` and `maxOutputTokens` must be nested under `generationConfig
 ### System Prompt
 
 The system prompt in `agent-runner.ts` teaches the model:
-- The 16 available tools and their parameter ranges
+- The 21 available tools and their parameter ranges
 - Normalized 0-1 coordinate convention (origin top-left)
 - That any CSS color string is accepted
 - 5 worked examples (grayscale, sky+vignette, red circle, blue background, "Hello" text)
@@ -1083,7 +1089,12 @@ The system prompt in `agent-runner.ts` teaches the model:
 
 > **Note on self-eval:** You do **not** need to update the self-eval prompt when adding a new tool. The self-eval prompt is generic — it asks the vision model to evaluate whether the edit accomplished the user's request, regardless of which tools were used. The preference memory's "most-accepted/most-rejected tool types" stat will automatically pick up the new tool's labels (since it groups by the first 3 words of each tool-call label).
 
-### Extension Points (Out of Scope for v1)
+### Extension Points
+
+- **Multi-frame Figma import** — currently imports one frame at a time; batch frame import to layers is a natural extension.
+- **Layer mapping on Figma import** — positional matching against existing layers could auto-place imported frames.
+
+### Out of Scope for v1
 
 - **Server-side proxy** for the API key — would remove client-side exposure entirely. Out of scope per the project's "no cloud dependency" design principle.
 - **Segmentation model (SAM)** for tighter selection masks — the existing Magic Wand tolerance/flood-fill is used as a bridge. A future `selectRegionBySegmentation` tool could plug in here.

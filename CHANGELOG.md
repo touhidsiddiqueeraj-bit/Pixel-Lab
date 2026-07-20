@@ -9,7 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### 🐛 Fixed
+
+#### Lasso Overlay Rendering (`EditorCanvas.tsx`)
+- Marching-squares contour trace in `drawOverlay()` replaces bounding-box `strokeRect` for lasso, polygonal lasso, magnetic lasso, and magic wand selection paths
+- `strokeRect` preserved for marquee-rect and marquee-ellipse (correct for those tools)
+
+#### Move Tool (`EditorCanvas.tsx`)
+- Snapshots active layer pixels on pointerdown
+- Live offset redraw on pointermove
+- Commits with `pushHistory('Move')` on pointerup
+- Selection bounds translate with content
+
+### 🚀 Added
+
+#### Canvas Snapshot MCP Tool (`mcp/server.ts`, `src/lib/agent/tools.ts`)
+- `getCanvasSnapshot` — returns current workspace composite as base64 JPEG + metadata (docWidth, docHeight, zoom, activeLayerId, layerCount)
+- MCP response includes an image content block for compatible clients (Claude Desktop, Claude Code)
+- Reuses `compositeWorkspace` + `scaleCanvasToMax` helpers
+
+#### Recipe MCP Tools (`mcp/server.ts`, `src/lib/agent/tools.ts`)
+- `saveRecipe(name, steps)` — persist automation recipe to `useAutomationsStore`
+- `listRecipes` — return all saved recipes with step count and timestamps
+- `runRecipe(name)` — execute recipe steps via `executeTool` loop
+- `deleteRecipe(name)` — remove a saved recipe
+- All four skip the browser WebSocket — handled entirely server-side
+
+#### Figma Import Dialog (`src/lib/figma/figma-import.ts`, `src/components/editor/FigmaImportDialog.tsx`)
+- **`figma-import.ts`** — API client with two endpoints: `fetchFigmaFileInfo(fileKey, token)` (nodes + metadata) and `importFigmaFrames(fileKey, token, frameIds)` (downloads frame PNGs via Figma image renders)
+- **`FigmaImportDialog.tsx`** — PAT v1 authentication, file key input, live frame selector with thumbnails, progress bar, result summary
+- Wired into **MenuBar.tsx** (File → Import from Figma...) and **PhotoEditor.tsx** (state + dialog mount)
 
 ---
 

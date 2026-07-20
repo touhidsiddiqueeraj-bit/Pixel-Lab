@@ -220,7 +220,7 @@ responds to:
 | Method | Description |
 |---|---|
 | `initialize` | Returns server capabilities + protocol version |
-| `tools/list` | Returns the full tool manifest (15 tools) |
+| `tools/list` | Returns the full tool manifest (20 tools) |
 | `tools/call` | Executes a tool call against the browser's current document |
 
 Example `tools/call` request:
@@ -252,7 +252,7 @@ Response:
 
 ### Available Tools
 
-The MCP server exposes the same 15+ tools as Luna and automation recipes:
+The MCP server exposes the same 20 tools as Luna and automation recipes:
 
 | Tool | Description |
 |---|---|
@@ -269,6 +269,11 @@ The MCP server exposes the same 15+ tools as Luna and automation recipes:
 | `drawScatterStroke` | Scatter/spray brush |
 | `addText` | Render text with font, size, color |
 | `fillBucket` | Paint-bucket flood fill |
+| `getCanvasSnapshot` | Current workspace composite as base64 JPEG + doc metadata (docWidth, docHeight, zoom, activeLayerId, layerCount). Returns an MCP image content block for compatible clients. |
+| `saveRecipe` | Save an automation recipe with name and step array to the automations store |
+| `listRecipes` | List all saved recipes with step count and timestamps |
+| `runRecipe` | Execute all steps of a named recipe sequentially via the tool execution layer |
+| `deleteRecipe` | Remove a saved recipe by name |
 
 All coordinates are normalized 0-1 (origin top-left). Colors are any CSS
 color string (hex, named, rgb(), hsl()).

@@ -112,8 +112,10 @@ src/
 │   └── agent/                  # AI editing agent (Gemini-powered, optional feature)
 │       ├── agent-store.ts      # Zustand slice — in-memory API key, chat thread, pending preview, self-eval result, preference memory (localStorage)
 │       ├── gemini-client.ts    # Thin wrapper around Gemini generateContent + evaluateEditQuality (vision self-eval)
-│       ├── tools.ts            # 16-tool schema + executor wrapping existing editor functions
+│       ├── tools.ts            # 21-tool schema + executor wrapping existing editor functions
 │       └── agent-runner.ts     # Orchestration loop — offscreen workspace, MAX_TOOL_CALLS, self-eval + retry, preference memory, commit/reject
+│   └── figma/                  # Figma API import
+│       └── figma-import.ts     # Figma file/frame API client (two endpoints, PAT auth)
 └── components/
     ├── ui/                     # shadcn/ui primitive components
     └── editor/                 # Editor-specific components
@@ -128,6 +130,7 @@ src/
         ├── HistoryPanel.tsx    # Undo/redo history
         ├── NavigatorPanel.tsx  # Minimap & brush presets
         ├── AgentPanel.tsx      # AI editing agent (Copilot-Chat-style UI)
+        ├── FigmaImportDialog.tsx # Figma import dialog (PAT auth, frame selector, progress)
         ├── VectorizeDialog.tsx # Vectorization dialog
         ├── NewDocumentDialog.tsx # New document presets
         ├── ThemeToggle.tsx     # Light/dark toggle
@@ -141,13 +144,13 @@ src/
 |------|-------------|
 | `editor-store.ts` | Central state. All actions live here (clipboard, adjustment layers, tutorial, recent files, shortcuts). Read this first. |
 | `editor-types.ts` | Type definitions. Update when adding tools/options. 40 tool types, 16+ tool options. |
-| `EditorCanvas.tsx` | Largest file (~1800 lines). All 40 tool implementations, pointer capture, auto-fit zoom. |
+| `EditorCanvas.tsx` | Largest file (~2100 lines). All 40 tool implementations, pointer capture, auto-fit zoom. |
 | `image-processing.ts` | All filter algorithms (~1950 lines). Filters, Lightroom adjustments, LUT, content-aware fill, pattern maker. |
 | `vector-shapes.ts` | Illustrator-style shapes. Star, polygon, arrow, heart, speech bubble, spiral, calligraphy, scatter. |
 | `vectorize.ts` | Raster-to-SVG pipeline. Color quantization, boundary tracing, path simplification. |
 | `perf.ts` | Performance utilities. Device tier detection, RAF throttle, canvas pool, memory manager. |
 | `MenuBar.tsx` | All menu items (100+). File, Edit, Image, Layer, Filter, Vector, View menus. |
-| `agent/tools.ts` | 16-tool schema + executor for the AI agent. Read this before adding a new agent tool. See [ARCHITECTURE.md → AI Editing Agent](ARCHITECTURE.md#ai-editing-agent-gemini-powered) for the full pattern. |
+| `agent/tools.ts` | 21-tool schema + executor for the AI agent. Read this before adding a new agent tool. See [ARCHITECTURE.md → AI Editing Agent](ARCHITECTURE.md#ai-editing-agent-gemini-powered) for the full pattern. |
 | `agent/agent-runner.ts` | Orchestration loop. Captures an offscreen workspace snapshot, runs the tool-call loop, runs the 🆕 vision self-eval (with retry), builds the before/after preview, records 🆕 preference memory on Accept/Reject. |
 | `agent/gemini-client.ts` | 🆕 Now also contains `evaluateEditQuality()` — sends BEFORE+AFTER images to Gemini Vision for a 1–10 quality score. Used by the self-eval retry loop. |
 | `agent/agent-store.ts` | 🆕 Now also holds `selfEval` (current self-eval result) and `preferenceEntries` (localStorage-persisted accept/reject history). Use `addPreferenceEntry()` to record; `getPreferenceSummary()` to get the system-prompt string. |
