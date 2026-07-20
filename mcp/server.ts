@@ -204,6 +204,62 @@ const TOOLS = [
     description: 'Undo the last operation (no-op in preview mode — use Reject instead).',
     inputSchema: { type: 'object', properties: {} },
   },
+  {
+    name: 'saveRecipe',
+    description: 'Save a named, reusable recipe — a fixed sequence of tool calls. name: recipe name, steps: array of {toolName, args}.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        steps: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              toolName: { type: 'string' },
+              args: { type: 'object', properties: {} },
+            },
+            required: ['toolName', 'args'],
+          },
+        },
+      },
+      required: ['name', 'steps'],
+    },
+  },
+  {
+    name: 'listRecipes',
+    description: 'List saved recipes (id, name, step count).',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'runRecipe',
+    description: 'Run a saved recipe by id against the current document.',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'deleteRecipe',
+    description: 'Delete a saved recipe by id.',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'getCanvasSnapshot',
+    description: 'Get the current composited canvas as a base64 JPEG image, plus basic workspace metadata (dimensions, layer count, active layer, whether a selection is active). Use this to see the current state before deciding what to do next.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        maxDimension: { type: 'number', description: 'Longest edge in px, default 1024.' },
+        quality: { type: 'number', description: 'JPEG quality 0-1, default 0.85.' },
+      },
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -340,16 +396,18 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse | null {
       // Return a promise-based response — we'll write it to stdout when ready
       resultPromise
         .then((result) => {
+          const content: { type: string; text?: string; data?: string; mimeType?: string }[] = [];
+          const r = result as Record<string, unknown>;
+          // For getCanvasSnapshot, include the thumbnail as an MCP image block
+          if (toolName === 'getCanvasSnapshot' && typeof r.thumbnailBase64 === 'string') {
+            const raw = r.thumbnailBase64.replace(/^data:image\/\w+;base64,/, '');
+            content.push({ type: 'image', data: raw, mimeType: 'image/jpeg' });
+          }
+          content.push({ type: 'text', text: JSON.stringify(r, null, 2) });
           const response: JsonRpcResponse = {
             jsonrpc: '2.0',
             id: req.id,
-            result: {
-              content: [{
-                type: 'text',
-                text: JSON.stringify(result, null, 2),
-              }],
-              isError: false,
-            },
+            result: { content, isError: false },
           };
           process.stdout.write(JSON.stringify(response) + '\n');
         })

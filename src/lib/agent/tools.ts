@@ -69,6 +69,7 @@ import {
 } from '@/lib/vector-shapes';
 import type { LayerData } from '@/lib/editor-types';
 import type { GeminiFunctionDeclaration } from './gemini-client';
+import { useAutomationsStore } from '@/lib/automations/automations-store';
 
 // ---------------------------------------------------------------------------
 // Workspace — what every tool sees & mutates
@@ -617,6 +618,71 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
         tolerance: { type: 'number', description: 'Color similarity tolerance 0-100 (higher = broader match). Default 32.' },
       },
       required: ['x', 'y', 'color'],
+    },
+  },
+  {
+    name: 'saveRecipe',
+    description:
+      'Save a named, reusable recipe — a fixed sequence of tool calls that can ' +
+      'be run later with one click (or via runRecipe). Use this when the user ' +
+      'asks you to remember/save a workflow, or after you\'ve worked out a good ' +
+      'sequence of edits worth reusing.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Recipe name.' },
+        steps: {
+          type: 'array',
+          description: 'Ordered list of {toolName, args} — any tool from this same tool list.',
+          items: {
+            type: 'object',
+            properties: {
+              toolName: { type: 'string' },
+              args: { type: 'object', properties: {} },
+            },
+            required: ['toolName', 'args'],
+          },
+        },
+      },
+      required: ['name', 'steps'],
+    },
+  },
+  {
+    name: 'listRecipes',
+    description: 'List saved recipes (id, name, step count).',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'runRecipe',
+    description: 'Run a saved recipe by id against the current workspace, in order.',
+    parameters: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'Recipe id (from listRecipes).' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'deleteRecipe',
+    description: 'Delete a saved recipe by id.',
+    parameters: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'Recipe id to delete.' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'getCanvasSnapshot',
+    description:
+      'Get the current composited canvas as a base64 JPEG image, plus basic ' +
+      'workspace metadata (dimensions, layer count, active layer, whether a ' +
+      'selection is active). Use this to see the current state before deciding ' +
+      'what to do next.',
+    parameters: {
+      type: 'object',
+      properties: {
+        maxDimension: { type: 'number', description: 'Longest edge in px, default 1024.' },
+        quality: { type: 'number', description: 'JPEG quality 0-1, default 0.85.' },
+      },
     },
   },
   {
@@ -1578,6 +1644,79 @@ export async function executeTool(
       };
     }
 
+    // ----- saveRecipe -----
+    case 'saveRecipe': {
+      const name = str(args.name, 'Unnamed Recipe');
+      const steps = Array.isArray(args.steps) ? args.steps.map((s: unknown) => ({
+        toolName: str((s as Record<string, unknown>).toolName, ''),
+        args: ((s as Record<string, unknown>).args ?? {}) as Record<string, unknown>,
+      })) : [];
+      if (steps.length === 0) {
+        return { success: false, message: 'saveRecipe requires at least one step.' };
+      }
+      const id = useAutomationsStore.getState().addAutomation(name, steps);
+      return { success: true, message: `Recipe "${name}" saved (id: ${id}, ${steps.length} steps).` };
+    }
+
+    // ----- listRecipes -----
+    case 'listRecipes': {
+      const recipes = useAutomationsStore.getState().automations;
+      if (recipes.length === 0) {
+        return { success: true, message: 'No saved recipes.' };
+      }
+      const lines = recipes.map((r) => `${r.id}: "${r.name}" (${r.steps.length} steps)`);
+      return { success: true, message: lines.join('\n') };
+    }
+
+    // ----- runRecipe -----
+    case 'runRecipe': {
+      const recipeId = str(args.id, '');
+      const recipe = useAutomationsStore.getState().automations.find((a) => a.id === recipeId);
+      if (!recipe) {
+        return { success: false, message: `No recipe with id "${recipeId}".` };
+      }
+      for (let i = 0; i < recipe.steps.length; i++) {
+        const step = recipe.steps[i];
+        const r = await executeTool(step.toolName, step.args, ws, _opts);
+        if (!r.success) {
+          return {
+            success: false,
+            message: `Recipe "${recipe.name}" failed at step ${i + 1} (${step.toolName}): ${r.message}`,
+          };
+        }
+      }
+      return {
+        success: true,
+        message: `Ran recipe "${recipe.name}" (${recipe.steps.length} steps).`,
+      };
+    }
+
+    // ----- deleteRecipe -----
+    case 'deleteRecipe': {
+      const recipeId = str(args.id, '');
+      const recipe = useAutomationsStore.getState().automations.find((a) => a.id === recipeId);
+      if (!recipe) {
+        return { success: false, message: `No recipe with id "${recipeId}".` };
+      }
+      useAutomationsStore.getState().deleteAutomation(recipeId);
+      return { success: true, message: `Recipe "${recipe.name}" deleted.` };
+    }
+
+    // ----- getCanvasSnapshot -----
+    case 'getCanvasSnapshot': {
+      const canvas = compositeWorkspace(ws);
+      const maxDim = clamp(num(args.maxDimension, 1024), 64, 4096);
+      const quality = clamp(num(args.quality, 0.85), 0.1, 1);
+      const scaled = scaleCanvasToMax(canvas, maxDim);
+      return {
+        success: true,
+        message:
+          `Snapshot: ${ws.docWidth}x${ws.docHeight}, ${ws.layers.length} layer(s), ` +
+          `active=${ws.activeLayerId ?? 'none'}, selection=${ws.selectionMask ? 'yes' : 'no'}`,
+        thumbnailBase64: scaled.toDataURL('image/jpeg', quality),
+      };
+    }
+
     // ----- undo -----
     case 'undo': {
       // In the workspace model, undo within a turn isn't very meaningful
@@ -1597,6 +1736,18 @@ export async function executeTool(
 }
 
 // Small helper for the "grain" param that takes a separate size knob.
+function scaleCanvasToMax(canvas: HTMLCanvasElement, maxDim: number): HTMLCanvasElement {
+  const w = canvas.width;
+  const h = canvas.height;
+  if (w <= maxDim && h <= maxDim) return canvas;
+  const scale = Math.min(maxDim / w, maxDim / h);
+  const out = document.createElement('canvas');
+  out.width = Math.round(w * scale);
+  out.height = Math.round(h * scale);
+  out.getContext('2d')!.drawImage(canvas, 0, 0, out.width, out.height);
+  return out;
+}
+
 function paramsSizeFallback(args: Record<string, unknown>): number {
   const v = args.size;
   return num(v, 25);
@@ -1676,6 +1827,16 @@ export function describeToolCall(
       const y = Math.round(num(args.y, 0.5) * 100);
       return `Bucket fill ${color} at (${x}%, ${y}%)`;
     }
+    case 'saveRecipe':
+      return `Save recipe: ${args.name}`;
+    case 'listRecipes':
+      return 'List recipes';
+    case 'runRecipe':
+      return `Run recipe: ${args.id}`;
+    case 'deleteRecipe':
+      return `Delete recipe: ${args.id}`;
+    case 'getCanvasSnapshot':
+      return 'Canvas snapshot';
     case 'undo':
       return 'Undo (no-op in preview)';
     default:

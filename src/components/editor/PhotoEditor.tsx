@@ -16,6 +16,7 @@ import { AutomationsPanel } from './AutomationsPanel';
 import { useMcpBridge } from '@/lib/automations/mcp-client';
 import { NewDocumentDialog } from './NewDocumentDialog';
 import { VectorizeDialog } from './VectorizeDialog';
+import { FigmaImportDialog } from './FigmaImportDialog';
 import { ThemeToggle } from './ThemeToggle';
 import { PerformanceControls } from './PerformanceControls';
 import { Onboarding } from './Onboarding';
@@ -137,6 +138,7 @@ const ALL_MOBILE_TOOLS: MobileToolDef[] = MOBILE_TOOL_GROUPS.flatMap(g => g.tool
 export function PhotoEditor() {
   const [newDocOpen, setNewDocOpen] = useState(false);
   const [vectorizeOpen, setVectorizeOpen] = useState(false);
+  const [figmaImportOpen, setFigmaImportOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
   const [activeTab, setActiveTab] = useState<PanelTab>('layers');
   const [isMobile, setIsMobile] = useState(false);
@@ -403,7 +405,7 @@ export function PhotoEditor() {
                 <SheetTitle className="editor-text">Menu</SheetTitle>
               </SheetHeader>
               <div className="p-2 overflow-y-auto custom-scroll">
-                <MenuBar onOpenNewDoc={() => { setNewDocOpen(true); setMenuSheetOpen(false); }} />
+                <MenuBar onOpenNewDoc={() => { setNewDocOpen(true); setMenuSheetOpen(false); }} onOpenFigmaImport={() => { setFigmaImportOpen(true); setMenuSheetOpen(false); }} />
               </div>
             </SheetContent>
           </Sheet>
@@ -576,7 +578,7 @@ export function PhotoEditor() {
 
       {/* Desktop: menu bar inline */}
       {!isMobile && (
-        <MenuBar onOpenNewDoc={() => setNewDocOpen(true)} />
+        <MenuBar onOpenNewDoc={() => setNewDocOpen(true)} onOpenFigmaImport={() => setFigmaImportOpen(true)} />
       )}
       <OptionsBar />
 
@@ -697,6 +699,7 @@ export function PhotoEditor() {
 
       <NewDocumentDialog open={newDocOpen} onClose={() => setNewDocOpen(false)} />
       <VectorizeDialog open={vectorizeOpen} onClose={() => setVectorizeOpen(false)} />
+      <FigmaImportDialog open={figmaImportOpen} onClose={() => setFigmaImportOpen(false)} />
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <Onboarding />
       <TutorialPanel />

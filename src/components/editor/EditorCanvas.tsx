@@ -88,6 +88,10 @@ export function EditorCanvas() {
   const strokeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   // Spacebar state for pan mode
   const spacePressed = useRef(false);
+  // Move tool: snapshot of the active layer when a move gesture starts
+  const moveSourceRef = useRef<HTMLCanvasElement | null>(null);
+  // Move tool: saved original selectionBounds so we can compute offset deltas
+  const moveStartBoundsRef = useRef<typeof selectionBounds>(null);
   // Clone stamp source position
   const cloneSourceRef = useRef<Point | null>(null);
   // Clone stamp last paint position (for tracking delta)
@@ -215,10 +219,36 @@ export function EditorCanvas() {
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 4]);
         ctx.lineDashOffset = -(Date.now() / 80) % 8;
-        ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+        // For rectangular/elliptical marquee tools, use strokeRect (the
+        // bounding box IS the selection). For all other selection tools
+        // (lasso, polygonal-lasso, magnetic-lasso, magic-wand) trace the
+        // actual mask contour via marching squares so the user sees the
+        // real selection shape, not just the bounding box.
+        if (activeTool === 'marquee-rect' || activeTool === 'marquee-ellipse') {
+          ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+        } else {
+          const segs = marchSquaresContour(selectionMask, { x, y, w, h });
+          for (const seg of segs) {
+            ctx.beginPath();
+            ctx.moveTo(seg[0], seg[1]);
+            ctx.lineTo(seg[2], seg[3]);
+            ctx.stroke();
+          }
+        }
         ctx.strokeStyle = '#ffffff';
         ctx.lineDashOffset = (-(Date.now() / 80) % 8) + 4;
-        ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+        ctx.setLineDash([4, 4]);
+        if (activeTool === 'marquee-rect' || activeTool === 'marquee-ellipse') {
+          ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+        } else {
+          const segs = marchSquaresContour(selectionMask, { x, y, w, h });
+          for (const seg of segs) {
+            ctx.beginPath();
+            ctx.moveTo(seg[0], seg[1]);
+            ctx.lineTo(seg[2], seg[3]);
+            ctx.stroke();
+          }
+        }
         ctx.restore();
       }
     }
@@ -323,6 +353,64 @@ export function EditorCanvas() {
       ctx.restore();
     }
   }, [selectionMask, selectionBounds, activeTool, cursorPos, docWidth, docHeight, showGrid, guides]);
+
+  /**
+   * Marching-squares contour trace of a selection mask alpha channel.
+   * Returns an array of path segment pairs (x1,y1)-(x2,y2) in canvas coords.
+   * Each segment is [x1, y1, x2, y2].
+   */
+  function marchSquaresContour(
+    maskCanvas: HTMLCanvasElement,
+    bounds: { x: number; y: number; w: number; h: number },
+  ): number[][] {
+    const { x: bx, y: by, w, h } = bounds;
+    if (w < 1 || h < 1) return [];
+    const ctx = maskCanvas.getContext('2d', { willReadFrequently: true })!;
+    const imgData = ctx.getImageData(bx, by, w, h);
+    const data = imgData.data;
+    const segments: number[][] = [];
+
+    // Corner alpha > 128 → inside (1). Each cell produces 0, 1, or 2 segments.
+    // Edge midpoint lookup: 1=T, 2=B, 3=L, 4=R
+    // Tables: [s1_e1, s1_e2, s2_e1, s2_e2] (0 = none)
+    const CASE: [number, number, number, number][] = [
+      [0,0,0,0],[2,4,0,0],[1,4,0,0],[1,2,0,0],
+      [2,3,0,0],[3,4,0,0],[1,4,3,2],[1,3,0,0],
+      [1,3,0,0],[1,4,3,2],[1,2,0,0],[1,4,0,0],
+      [3,4,0,0],[2,3,0,0],[2,4,0,0],[0,0,0,0],
+    ];
+
+    for (let j = 0; j < h - 1; j++) {
+      for (let i = 0; i < w - 1; i++) {
+        const tl = data[(j * w + i) * 4 + 3] > 128 ? 1 : 0;
+        const tr = data[(j * w + i + 1) * 4 + 3] > 128 ? 1 : 0;
+        const bl = data[((j + 1) * w + i) * 4 + 3] > 128 ? 1 : 0;
+        const br = data[((j + 1) * w + i + 1) * 4 + 3] > 128 ? 1 : 0;
+        const code = (tl << 3) | (tr << 2) | (bl << 1) | br;
+        const [e1, e2, e3, e4] = CASE[code];
+        if (e1) {
+          const mid = (e: number) => {
+            switch (e) {
+              case 1: return [bx + i + 0.5, by + j];       // T
+              case 2: return [bx + i + 0.5, by + j + 1];   // B
+              case 3: return [bx + i, by + j + 0.5];       // L
+              case 4: return [bx + i + 1, by + j + 0.5];   // R
+              default: return [0, 0];
+            }
+          };
+          const [x1, y1] = mid(e1);
+          const [x2, y2] = mid(e2);
+          segments.push([x1, y1, x2, y2]);
+          if (e3) {
+            const [x3, y3] = mid(e3);
+            const [x4, y4] = mid(e4);
+            segments.push([x3, y3, x4, y4]);
+          }
+        }
+      }
+    }
+    return segments;
+  }
 
   // Animation loop for marching ants - throttled to 15fps to save CPU.
   // Also runs when the magnetic lasso is in progress so the pulsing start
@@ -1137,10 +1225,20 @@ export function EditorCanvas() {
       return;
     }
 
-    // Move tool (no immediate action on down)
+    // Move tool: snapshot the active layer so we can restore/offset during preview
     if (activeTool === 'move') {
       drawingRef.current = true;
       startPointRef.current = pt;
+      const layer = getActiveLayer();
+      if (layer && !layer.locked) {
+        const snap = createBlankCanvas(docWidth, docHeight);
+        snap.getContext('2d')!.drawImage(layer.canvas, 0, 0);
+        moveSourceRef.current = snap;
+        // Save original selection bounds so we can track the delta on each move
+        moveStartBoundsRef.current = selectionBounds
+          ? { x: selectionBounds.x, y: selectionBounds.y, w: selectionBounds.w, h: selectionBounds.h }
+          : null;
+      }
       return;
     }
 
@@ -1448,7 +1546,26 @@ export function EditorCanvas() {
     if (!drawingRef.current) return;
 
     if (activeTool === 'move') {
-      // Could implement layer move; for now just track
+      const layer = getActiveLayer();
+      if (!layer || layer.locked || !moveSourceRef.current) return;
+      const ctx = layer.canvas.getContext('2d')!;
+      const start = startPointRef.current!;
+      const dx = Math.round(pt.x - start.x);
+      const dy = Math.round(pt.y - start.y);
+      // Clear and redraw the snapshot at the current offset
+      ctx.clearRect(0, 0, docWidth, docHeight);
+      ctx.drawImage(moveSourceRef.current, dx, dy);
+      // Translate selection bounds so the marching ants follow the content
+      if (moveStartBoundsRef.current) {
+        const sb = moveStartBoundsRef.current;
+        setSelection(selectionMask, {
+          x: sb.x + dx,
+          y: sb.y + dy,
+          w: sb.w,
+          h: sb.h,
+        });
+      }
+      composite();
       return;
     }
 
@@ -1765,6 +1882,26 @@ export function EditorCanvas() {
       } else {
         clearSelection();
       }
+      return;
+    }
+
+    // Move tool: the live preview already painted the final state into the
+    // layer canvas. We just need to push a history entry and clean up.
+    if (activeTool === 'move') {
+      const layer = getActiveLayer();
+      if (layer && !layer.locked) {
+        if (moveSourceRef.current) {
+          // The layer already has the moved content from onPointerMove.
+          // If the user didn't actually move (click without drag), the
+          // layer is unchanged — still push a lightweight entry so undo
+          // works if they did drag.
+          refreshThumbnail(layer.id);
+          pushHistory('Move');
+        }
+      }
+      moveSourceRef.current = null;
+      moveStartBoundsRef.current = null;
+      composite();
       return;
     }
 

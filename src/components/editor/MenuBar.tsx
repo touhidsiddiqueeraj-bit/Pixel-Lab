@@ -51,7 +51,7 @@ import {
   generateThumbnail,
 } from '@/lib/image-processing';
 
-export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
+export function MenuBar({ onOpenNewDoc, onOpenFigmaImport }: { onOpenNewDoc: () => void; onOpenFigmaImport?: () => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const placeInputRef = useRef<HTMLInputElement>(null);
 
@@ -316,6 +316,9 @@ export function MenuBar({ onOpenNewDoc }: { onOpenNewDoc: () => void }) {
             </MenubarItem>
             <MenubarItem className={itemClass} onClick={handlePlaceClick}>
               <span>Place Image...</span><span></span>
+            </MenubarItem>
+            <MenubarItem className={itemClass} onClick={onOpenFigmaImport}>
+              <span>Import from Figma...</span><span></span>
             </MenubarItem>
             <MenubarSeparator className="editor-border" />
             <MenubarItem className={itemClass} onClick={() => handleExport('png')}>
