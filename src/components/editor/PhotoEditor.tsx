@@ -527,24 +527,37 @@ export function PhotoEditor() {
 
           <ThemeToggle />
 
-          {/* MCP connection status indicator (desktop only) */}
+          {/* MCP connection status indicator — click to toggle (desktop only) */}
           {!isMobile && (
-            <div
-              className="flex items-center gap-1 px-1.5 h-7 rounded shrink-0"
-              title={mcpState.connected
-                ? 'MCP bridge connected — external clients can call Pixel Lab tools'
-                : mcpState.connecting
-                  ? 'MCP bridge connecting…'
-                  : 'MCP bridge offline — run `bun run mcp/server.ts` to enable external tool calls'}
+            <button
+              onClick={mcpState.toggle}
+              className="flex items-center gap-1 px-1.5 h-7 rounded shrink-0 hover:editor-surface-3 cursor-pointer"
+              title={
+                !mcpState.enabled
+                  ? 'MCP bridge disabled — click to enable'
+                  : mcpState.connected
+                    ? 'MCP bridge connected — click to disable'
+                    : mcpState.connecting
+                      ? 'MCP bridge connecting…'
+                      : 'MCP bridge offline — click to disable'
+              }
             >
               <span
                 className={cn(
                   'inline-block w-2 h-2 rounded-full shrink-0',
-                  mcpState.connected ? 'bg-emerald-500' : mcpState.connecting ? 'bg-amber-500 animate-pulse' : 'bg-zinc-500',
+                  !mcpState.enabled
+                    ? 'bg-zinc-500'
+                    : mcpState.connected
+                      ? 'bg-emerald-500'
+                      : mcpState.connecting
+                        ? 'bg-amber-500 animate-pulse'
+                        : 'bg-zinc-500',
                 )}
               />
-              <span className="hidden xl:inline text-[10px] editor-text-muted">MCP</span>
-            </div>
+              <span className="hidden xl:inline text-[10px] editor-text-muted">
+                {mcpState.enabled ? 'MCP' : 'MCP off'}
+              </span>
+            </button>
           )}
 
           {/* Keyboard shortcuts "?" button (desktop only) */}

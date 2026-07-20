@@ -144,12 +144,15 @@ tools — Claude Desktop, Claude Code, Cursor, or custom agent frameworks.
 - The **MCP server** (`mcp/server.ts`) is a local Node/Bun process that
   speaks JSON-RPC 2.0 over stdio with the MCP client, and raw JSON over a
   WebSocket (port 3004) with the browser.
-- The **browser** auto-connects to `ws://localhost:3004` via the
-  `useMcpBridge()` hook in `src/lib/automations/mcp-client.ts`. When a tool
-  call arrives, it runs `executeTool` against the current document and sends
-  the result back.
+- The **browser** connects to `ws://localhost:3004` via the
+  `useMcpBridge()` hook in `src/lib/automations/mcp-client.ts` — **off by
+  default**, toggle it on by clicking the MCP dot in the title bar. When a
+  tool call arrives, it runs `executeTool` against the current document and
+  sends the result back.
 - The **MCP status indicator** (small dot in the title bar) shows connection
-  state: green = connected, amber = connecting, gray = offline.
+  state: green = connected, amber = connecting, gray = offline. **Click the
+  dot** to toggle the MCP bridge on/off. The setting is persisted to
+  `localStorage`.
 
 ### Starting the MCP Server
 

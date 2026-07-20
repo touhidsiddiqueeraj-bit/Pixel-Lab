@@ -145,6 +145,10 @@ interface EditorState {
   setCustomShortcut: (action: string, key: string) => void;
   resetShortcuts: () => void;
 
+  // MCP bridge toggle (persisted, off by default)
+  mcpEnabled: boolean;
+  setMcpEnabled: (v: boolean) => void;
+
   setSelection: (mask: HTMLCanvasElement | null, bounds: { x: number; y: number; w: number; h: number } | null) => void;
   clearSelection: () => void;
   selectAll: () => void;
@@ -305,6 +309,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   resetShortcuts: () => {
     try { localStorage.removeItem('pixel-lab-shortcuts'); } catch {}
     set({ customShortcuts: {} });
+  },
+
+  // MCP bridge — off by default, persisted
+  mcpEnabled: (() => {
+    try { return localStorage.getItem('pixel-lab-mcp-enabled') === 'true'; } catch { return false; }
+  })(),
+  setMcpEnabled: (v) => {
+    try { localStorage.setItem('pixel-lab-mcp-enabled', String(v)); } catch {}
+    set({ mcpEnabled: v });
   },
 
   guides: { x: [], y: [] },

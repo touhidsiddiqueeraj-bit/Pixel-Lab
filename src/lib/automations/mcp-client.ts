@@ -19,8 +19,9 @@
  * can call tools even when the user isn't looking at the Automations tab).
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useEditorStore } from '@/lib/editor-store';
+import { useShallow } from 'zustand/react/shallow';
 import { executeTool, compositeWorkspace, type AgentWorkspace } from '@/lib/agent/tools';
 import { createBlankCanvas } from '@/lib/image-processing';
 import type { LayerData } from '@/lib/editor-types';
@@ -38,7 +39,7 @@ export interface McpConnectionState {
  * Hook that manages the MCP WebSocket connection.
  * Call this once at the app root (PhotoEditor) so the connection is always live.
  */
-export function useMcpBridge(): McpConnectionState {
+export function useMcpBridge(): McpConnectionState & { enabled: boolean; toggle: () => void } {
   const [state, setState] = useState<McpConnectionState>({
     connected: false,
     connecting: false,
@@ -48,7 +49,21 @@ export function useMcpBridge(): McpConnectionState {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const { mcpEnabled, setMcpEnabled } = useEditorStore(useShallow((s) => ({
+    mcpEnabled: s.mcpEnabled,
+    setMcpEnabled: s.setMcpEnabled,
+  })));
+  const toggle = useCallback(() => setMcpEnabled(!mcpEnabled), [mcpEnabled, setMcpEnabled]);
+
   useEffect(() => {
+    if (!mcpEnabled) {
+      // Tear down any existing connection
+      if (reconnectTimer.current) { clearTimeout(reconnectTimer.current); reconnectTimer.current = null; }
+      if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.close(); wsRef.current = null; }
+      setState({ connected: false, connecting: false, error: null, lastCall: null });
+      return;
+    }
+
     let cancelled = false;
 
     const connect = () => {
@@ -129,9 +144,9 @@ export function useMcpBridge(): McpConnectionState {
         wsRef.current.close();
       }
     };
-  }, []);
+  }, [mcpEnabled]);
 
-  return state;
+  return { ...state, enabled: mcpEnabled, toggle };
 }
 
 // ---------------------------------------------------------------------------
