@@ -66,6 +66,11 @@ export function EditorCanvas() {
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const checkerRef = useRef<HTMLCanvasElement>(null);
 
+  // Cache for marching-ants contour segments — only recompute when mask
+  // reference changes, not every animation frame.
+  const contourSegmentsRef = useRef<number[][]>([]);
+  const lastMaskRef = useRef<HTMLCanvasElement | null>(null);
+
   // Tool state
   const drawingRef = useRef(false);
   const lastPointRef = useRef<Point | null>(null);
@@ -214,20 +219,27 @@ export function EditorCanvas() {
     if (selectionMask && selectionBounds) {
       const { x, y, w, h } = selectionBounds;
       if (w > 0 && h > 0) {
+        // Cache contour segments — only trace when mask reference changes.
+        if (selectionMask !== lastMaskRef.current) {
+          lastMaskRef.current = selectionMask;
+          if (activeTool === 'marquee-rect' || activeTool === 'marquee-ellipse') {
+            contourSegmentsRef.current = [];
+          } else {
+            contourSegmentsRef.current = marchSquaresContour(selectionMask, { x, y, w, h });
+          }
+        }
+        const segs = contourSegmentsRef.current;
+        const antOffset = -(Date.now() / 80) % 8;
+
         ctx.save();
+        // Black dash pass
         ctx.strokeStyle = '#000000';
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 4]);
-        ctx.lineDashOffset = -(Date.now() / 80) % 8;
-        // For rectangular/elliptical marquee tools, use strokeRect (the
-        // bounding box IS the selection). For all other selection tools
-        // (lasso, polygonal-lasso, magnetic-lasso, magic-wand) trace the
-        // actual mask contour via marching squares so the user sees the
-        // real selection shape, not just the bounding box.
+        ctx.lineDashOffset = antOffset;
         if (activeTool === 'marquee-rect' || activeTool === 'marquee-ellipse') {
           ctx.strokeRect(x + 0.5, y + 0.5, w, h);
         } else {
-          const segs = marchSquaresContour(selectionMask, { x, y, w, h });
           for (const seg of segs) {
             ctx.beginPath();
             ctx.moveTo(seg[0], seg[1]);
@@ -235,13 +247,12 @@ export function EditorCanvas() {
             ctx.stroke();
           }
         }
+        // White dash pass (offset by 4px for the marching effect)
         ctx.strokeStyle = '#ffffff';
-        ctx.lineDashOffset = (-(Date.now() / 80) % 8) + 4;
-        ctx.setLineDash([4, 4]);
+        ctx.lineDashOffset = antOffset + 4;
         if (activeTool === 'marquee-rect' || activeTool === 'marquee-ellipse') {
           ctx.strokeRect(x + 0.5, y + 0.5, w, h);
         } else {
-          const segs = marchSquaresContour(selectionMask, { x, y, w, h });
           for (const seg of segs) {
             ctx.beginPath();
             ctx.moveTo(seg[0], seg[1]);
