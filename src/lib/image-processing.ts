@@ -186,46 +186,6 @@ export function applyThreshold(ctx: CanvasRenderingContext2D, w: number, h: numb
   ctx.putImageData(imageData, 0, 0);
 }
 
-// Box blur
-export function applyBoxBlur(ctx: CanvasRenderingContext2D, w: number, h: number, radius: number) {
-  if (radius < 1) return;
-  const imageData = ctx.getImageData(0, 0, w, h);
-  const src = imageData.data;
-  const dst = new Uint8ClampedArray(src.length);
-  const size = radius * 2 + 1;
-  // Horizontal pass
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      let r = 0, g = 0, b = 0, a = 0, count = 0;
-      for (let dx = -radius; dx <= radius; dx++) {
-        const px = Math.max(0, Math.min(w - 1, x + dx));
-        const i = (y * w + px) * 4;
-        r += src[i]; g += src[i + 1]; b += src[i + 2]; a += src[i + 3];
-        count++;
-      }
-      const di = (y * w + x) * 4;
-      dst[di] = r / count; dst[di + 1] = g / count; dst[di + 2] = b / count; dst[di + 3] = a / count;
-    }
-  }
-  // Vertical pass
-  const final = new Uint8ClampedArray(src.length);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      let r = 0, g = 0, b = 0, a = 0, count = 0;
-      for (let dy = -radius; dy <= radius; dy++) {
-        const py = Math.max(0, Math.min(h - 1, y + dy));
-        const i = (py * w + x) * 4;
-        r += dst[i]; g += dst[i + 1]; b += dst[i + 2]; a += dst[i + 3];
-        count++;
-      }
-      const di = (y * w + x) * 4;
-      final[di] = r / count; final[di + 1] = g / count; final[di + 2] = b / count; final[di + 3] = a / count;
-    }
-  }
-  ctx.putImageData(new ImageData(final, w, h), 0, 0);
-  void size;
-}
-
 // Sharpen (using convolution kernel)
 export function applySharpen(ctx: CanvasRenderingContext2D, w: number, h: number, amount: number) {
   if (amount <= 0) return;

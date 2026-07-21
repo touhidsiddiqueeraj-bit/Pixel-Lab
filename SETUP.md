@@ -8,7 +8,6 @@ made the zip 1.4GB instead of 4.3MB).
 
 - Full `src/` source (Next.js 16 + TypeScript + Tailwind 4)
 - `public/` assets (logo, screenshots)
-- `prisma/` schema
 - `mcp/` server (for external AI agent integration)
 - `examples/` (websocket server + frontend)
 - `scripts/` (development screenshot artifacts — safe to delete)
@@ -26,7 +25,7 @@ made the zip 1.4GB instead of 4.3MB).
 - `.next/` — build with `bun run build`
 - `.git/` — re-clone from https://github.com/touhidsiddiqueeraj-bit/Pixel-Lab
   if you need git history
-- `db/custom.db` — SQLite database, auto-created on first run via Prisma
+
 
 ## Quick start
 

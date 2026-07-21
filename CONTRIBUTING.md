@@ -148,7 +148,7 @@ src/
 | `image-processing.ts` | All filter algorithms (~1950 lines). Filters, Lightroom adjustments, LUT, content-aware fill, pattern maker. |
 | `vector-shapes.ts` | Illustrator-style shapes. Star, polygon, arrow, heart, speech bubble, spiral, calligraphy, scatter. |
 | `vectorize.ts` | Raster-to-SVG pipeline. Color quantization, boundary tracing, path simplification. |
-| `perf.ts` | Performance utilities. Device tier detection, RAF throttle, canvas pool, memory manager. |
+| `perf.ts` | Performance utilities: device tier detection, RAF throttle, PerfMonitor. |
 | `MenuBar.tsx` | All menu items (100+). File, Edit, Image, Layer, Filter, Vector, View menus. |
 | `agent/tools.ts` | 21-tool schema + executor for the AI agent. Read this before adding a new agent tool. See [ARCHITECTURE.md → AI Editing Agent](ARCHITECTURE.md#ai-editing-agent-gemini-powered) for the full pattern. |
 | `agent/agent-runner.ts` | Orchestration loop. Captures an offscreen workspace snapshot, runs the tool-call loop, runs the 🆕 vision self-eval (with retry), builds the before/after preview, records 🆕 preference memory on Accept/Reject. |

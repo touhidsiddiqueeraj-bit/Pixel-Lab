@@ -12,6 +12,7 @@
  */
 
 import { create } from 'zustand';
+import { generateId } from '@/lib/utils';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -69,10 +70,6 @@ interface AutomationsState {
 // ---------------------------------------------------------------------------
 
 const LS_KEY = 'pixel-lab-automations';
-
-function generateId(): string {
-  return Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
-}
 
 // Load saved automations from localStorage.
 function loadInitialAutomations(): Automation[] {

@@ -17,11 +17,11 @@ export default function Home() {
   // Gated on NODE_ENV === 'development' so it's stripped in production builds.
   useEffect(() => {
     if (process.env.NODE_ENV === 'development') {
-      (window as unknown as { __editorStore: typeof useEditorStore }).__editorStore = useEditorStore;
-      (window as unknown as { __agentStore: typeof useAgentStore }).__agentStore = useAgentStore;
-      (window as unknown as { __automationsStore: typeof useAutomationsStore }).__automationsStore = useAutomationsStore;
-      (window as unknown as { __runAutomation: typeof runAutomationOnCurrentDoc }).__runAutomation = runAutomationOnCurrentDoc;
-      (window as unknown as { __runAutomationBatch: typeof runAutomationBatch }).__runAutomationBatch = runAutomationBatch;
+      (window as any).__editorStore = useEditorStore;
+      (window as any).__agentStore = useAgentStore;
+      (window as any).__automationsStore = useAutomationsStore;
+      (window as any).__runAutomation = runAutomationOnCurrentDoc;
+      (window as any).__runAutomationBatch = runAutomationBatch;
     }
   }, []);
 

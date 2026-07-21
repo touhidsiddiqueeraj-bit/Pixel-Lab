@@ -15,7 +15,7 @@ import {
   generateThumbnail,
 } from './image-processing';
 import { featherSelection as featherMask } from './image-processing';
-import { getPerfSettings, type PerfSettings, memory } from './perf';
+import { getPerfSettings, type PerfSettings } from './perf';
 import { toast } from 'sonner';
 
 const DEFAULT_TOOL_OPTIONS: ToolOptions = {
@@ -48,9 +48,7 @@ const DEFAULT_TOOL_OPTIONS: ToolOptions = {
 const MAX_HISTORY = 40;
 const DEFAULT_PERF_SETTINGS = getPerfSettings();
 
-function generateId(): string {
-  return Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
-}
+import { generateId } from '@/lib/utils';
 
 interface EditorState {
   // Document
@@ -120,10 +118,6 @@ interface EditorState {
   copySelection: () => void;
   pasteAsNewLayer: () => void;
 
-  // Layer groups
-  toggleLayerGroup: (id: string) => void;
-  moveLayerIntoGroup: (id: string, groupId: string) => void;
-
   // Adjustment layers (non-destructive)
   addAdjustmentLayer: (name: string, settings: Record<string, number>) => void;
   updateAdjustmentLayer: (id: string, settings: Record<string, number>) => void;
@@ -134,16 +128,6 @@ interface EditorState {
   recentFiles: { name: string; dataUrl: string; timestamp: number }[];
   addRecentFile: (name: string, dataUrl: string) => void;
   clearRecentFiles: () => void;
-
-  // Export presets
-  exportPresets: { name: string; format: string; quality: number; maxWidth: number }[];
-  saveExportPreset: (preset: { name: string; format: string; quality: number; maxWidth: number }) => void;
-  deleteExportPreset: (index: number) => void;
-
-  // Custom keyboard shortcuts
-  customShortcuts: Record<string, string>;
-  setCustomShortcut: (action: string, key: string) => void;
-  resetShortcuts: () => void;
 
   // MCP bridge toggle (persisted, off by default)
   mcpEnabled: boolean;
@@ -253,14 +237,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   // Layer groups (simple: toggle a group flag on layer)
-  toggleLayerGroup: (id) => set((s) => ({
-    layers: s.layers.map((l) => l.id === id ? { ...l, locked: !l.locked } : l), // reuse locked as collapsed flag for groups
-  })),
-  moveLayerIntoGroup: (id, groupId) => set((s) => {
-    // Simple implementation: just reorder
-    return s;
-  }),
-
   // Adjustment layers
   adjustmentLayers: [],
   addAdjustmentLayer: (name, settings) => set((s) => ({
@@ -281,35 +257,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     return { recentFiles: [file, ...filtered].slice(0, 10) };
   }),
   clearRecentFiles: () => set({ recentFiles: [] }),
-
-  // Export presets (persisted to localStorage)
-  exportPresets: (() => {
-    try { return JSON.parse(localStorage.getItem('pixel-lab-export-presets') || '[]'); } catch { return []; }
-  })(),
-  saveExportPreset: (preset) => set((s) => {
-    const presets = [...s.exportPresets, preset];
-    try { localStorage.setItem('pixel-lab-export-presets', JSON.stringify(presets)); } catch {}
-    return { exportPresets: presets };
-  }),
-  deleteExportPreset: (index) => set((s) => {
-    const presets = s.exportPresets.filter((_, i) => i !== index);
-    try { localStorage.setItem('pixel-lab-export-presets', JSON.stringify(presets)); } catch {}
-    return { exportPresets: presets };
-  }),
-
-  // Custom shortcuts (persisted to localStorage)
-  customShortcuts: (() => {
-    try { return JSON.parse(localStorage.getItem('pixel-lab-shortcuts') || '{}'); } catch { return {}; }
-  })(),
-  setCustomShortcut: (action, key) => set((s) => {
-    const shortcuts = { ...s.customShortcuts, [action]: key };
-    try { localStorage.setItem('pixel-lab-shortcuts', JSON.stringify(shortcuts)); } catch {}
-    return { customShortcuts: shortcuts };
-  }),
-  resetShortcuts: () => {
-    try { localStorage.removeItem('pixel-lab-shortcuts'); } catch {}
-    set({ customShortcuts: {} });
-  },
 
   // MCP bridge — off by default, persisted
   mcpEnabled: (() => {

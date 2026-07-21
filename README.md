@@ -427,7 +427,7 @@ The **Agent** tab in the right panel lets you describe edits in plain English an
 | **Luna** | Google Gemini API (`generateContent` with `functionDeclarations`) — called directly from the browser, no backend proxy |
 | **Icons** | Lucide React |
 | **Toasts** | Sonner |
-| **Database** | Prisma (optional — for app-level features like recent files, not for image data) |
+| **Database** | None (image data lives in Canvas, state in Zustand + localStorage) |
 | **Package Manager** | Bun (recommended) or npm |
 
 **No cloud dependency:** 100% client-side processing. The only external API call is the user's own Gemini key, sent directly to Google by Luna.
@@ -483,7 +483,6 @@ pixel-lab/
 ├── public/
 │   ├── pixel-lab-logo.svg      # Logo
 │   └── screenshots/            # App screenshots
-├── prisma/                     # Prisma schema (optional)
 ├── examples/                   # Example code (e.g. websocket server)
 ├── .github/                    # GitHub templates (issues, PR, code of conduct, dependabot)
 ├── ARCHITECTURE.md             # System architecture (deep dive)

@@ -21,6 +21,7 @@
  */
 
 import { create } from 'zustand';
+import { generateId } from '@/lib/utils';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -412,10 +413,6 @@ export const MODEL_OPTIONS: { value: string; label: string; hint: string }[] = [
 export const MAX_TOOL_CALLS = 8;
 
 const MODEL_LS_KEY = 'pixel-lab-agent-model';
-
-function generateId(): string {
-  return Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
-}
 
 // Load model preference from localStorage (NON-SECRET — just a preference).
 // We deliberately do NOT load any API key from localStorage here.

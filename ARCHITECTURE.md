@@ -498,11 +498,11 @@ Uses `next-themes` with `defaultTheme="system"` to auto-detect OS preference. Us
 | File | Responsibility |
 |------|---------------|
 | `editor-types.ts` | TypeScript type definitions (40 tool types, 16+ tool options) |
-| `editor-store.ts` | Zustand store with all state and actions (clipboard, adjustment layers, recent files, export presets, custom shortcuts, tutorial, guides) |
+| `editor-store.ts` | Zustand store with all state and actions (clipboard, adjustment layers, recent files, tutorial, guides) |
 | `image-processing.ts` | Filter algorithms, Lightroom develop adjustments, LUT color grading, content-aware fill, seamless pattern maker, offset filter, align layers (~1950 lines) |
 | `vectorize.ts` | Raster-to-SVG vectorization pipeline |
 | `vector-shapes.ts` | Illustrator-style vector shapes (star, polygon, arrow, heart, speech bubble, spiral, calligraphy stroke, scatter brush, path smoothing) |
-| `perf.ts` | Performance utilities, device detection, RAF throttle, canvas pool, memory manager |
+| `perf.ts` | Performance utilities: device tier detection, RAF throttle, PerfMonitor |
 | `agent/agent-store.ts` | Zustand slice for the AI agent — in-memory API key (never persisted), model preference (persisted), chat thread, pending preview, cancel token |
 | `agent/gemini-client.ts` | Thin wrapper around Gemini `generateContent` REST endpoint with `functionDeclarations`; sends canvas as 1024px JPEG inline part |
 | `agent/tools.ts` | 21-tool schema + executor wrapping existing editor functions (filters, develop, selection, drawing, text, bucket fill, canvas snapshot, recipe CRUD) |
@@ -703,7 +703,7 @@ sequenceDiagram
 2. Add initial state value
 3. Implement the action function
 4. Subscribe to the state in components using `useEditorStore((s) => s.feature)`
-5. For persisted state, use `localStorage` (see `exportPresets` or `customShortcuts` for examples)
+5. For persisted state, use `localStorage`
 
 ## Pointer Capture System
 

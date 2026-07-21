@@ -333,23 +333,6 @@ export function computeStarInnerR(outerR: number, ratio: number): number {
   return outerR * Math.max(0.1, Math.min(0.9, ratio));
 }
 
-// Compute polygon vertices
-export function getPolygonVertices(
-  cx: number, cy: number,
-  radius: number,
-  sides: number,
-): { x: number; y: number }[] {
-  const verts: { x: number; y: number }[] = [];
-  for (let i = 0; i < sides; i++) {
-    const angle = (i / sides) * Math.PI * 2 - Math.PI / 2;
-    verts.push({
-      x: cx + Math.cos(angle) * radius,
-      y: cy + Math.sin(angle) * radius,
-    });
-  }
-  return verts;
-}
-
 // Get shape style from tool options and colors
 export function makeShapeStyle(
   fillColor: string,

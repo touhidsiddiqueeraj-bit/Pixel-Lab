@@ -24,7 +24,7 @@ import {
   computeStarInnerR,
   makeShapeStyle,
 } from '@/lib/vector-shapes';
-import { rafThrottle, perf, detectPerfTier, getPerfSettings, type PerfSettings } from '@/lib/perf';
+import { rafThrottle, detectPerfTier, getPerfSettings, type PerfSettings } from '@/lib/perf';
 import { TOOL_SHORTCUTS } from '@/lib/shortcuts';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -56,15 +56,12 @@ export function EditorCanvas() {
   const setTool = useEditorStore((s) => s.setTool);
   const showGrid = useEditorStore((s) => s.showGrid);
   const guides = useEditorStore((s) => s.guides);
-  const snapToGuides = useEditorStore((s) => s.snapToGuides);
-  const addGuide = useEditorStore((s) => s.addGuide);
   const settingSource = useEditorStore((s) => s.settingSource);
   const setSettingSource = useEditorStore((s) => s.setSettingSource);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const compositeCanvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
-  const checkerRef = useRef<HTMLCanvasElement>(null);
 
   // Cache for marching-ants contour segments — only recompute when mask
   // reference changes, not every animation frame.
@@ -118,21 +115,6 @@ export function EditorCanvas() {
   const [cursorPos, setCursorPos] = useState<Point | null>(null);
   const [, forceRender] = useState(0);
   const [containerSize, setContainerSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
-
-  // Build a checkerboard pattern canvas (for transparency)
-  useEffect(() => {
-    const size = 16;
-    const c = document.createElement('canvas');
-    c.width = size * 2;
-    c.height = size * 2;
-    const ctx = c.getContext('2d')!;
-    ctx.fillStyle = '#6b7280';
-    ctx.fillRect(0, 0, size * 2, size * 2);
-    ctx.fillStyle = '#9ca3af';
-    ctx.fillRect(0, 0, size, size);
-    ctx.fillRect(size, size, size, size);
-    checkerRef.current = c;
-  }, []);
 
   // Composite all visible layers onto the visible canvas - optimized to avoid resetting dimensions
   const composite = useCallback(() => {

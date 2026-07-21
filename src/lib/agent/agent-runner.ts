@@ -52,47 +52,7 @@ import {
   type ToolResult,
 } from './tools';
 import { createBlankCanvas, generateThumbnail } from '@/lib/image-processing';
-import type { LayerData } from '@/lib/editor-types';
-
-// ---------------------------------------------------------------------------
-// Snapshotting — clone the live editor state into a workspace
-// ---------------------------------------------------------------------------
-
-function cloneLayer(layer: LayerData, docWidth: number, docHeight: number): LayerData {
-  const canvas = createBlankCanvas(docWidth, docHeight);
-  const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(layer.canvas, 0, 0);
-  let maskCanvas: HTMLCanvasElement | null = null;
-  if (layer.maskCanvas) {
-    maskCanvas = createBlankCanvas(docWidth, docHeight);
-    maskCanvas.getContext('2d')!.drawImage(layer.maskCanvas, 0, 0);
-  }
-  return {
-    ...layer,
-    canvas,
-    maskCanvas,
-    // Don't bother generating a real thumbnail until we need to show it.
-    thumbnail: '',
-  };
-}
-
-function snapshotWorkspace(): AgentWorkspace {
-  const s = useEditorStore.getState();
-  const layers = s.layers.map((l) => cloneLayer(l, s.docWidth, s.docHeight));
-  let selectionMask: HTMLCanvasElement | null = null;
-  if (s.selectionMask) {
-    selectionMask = createBlankCanvas(s.docWidth, s.docHeight);
-    selectionMask.getContext('2d')!.drawImage(s.selectionMask, 0, 0);
-  }
-  return {
-    layers,
-    activeLayerId: s.activeLayerId,
-    docWidth: s.docWidth,
-    docHeight: s.docHeight,
-    selectionMask,
-    selectionBounds: s.selectionBounds ? { ...s.selectionBounds } : null,
-  };
-}
+import { cloneLayer, snapshotWorkspace } from '@/lib/workspace-utils';
 
 // ---------------------------------------------------------------------------
 // System prompt — gives the model context about the editor & tool usage
