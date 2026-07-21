@@ -90,10 +90,16 @@ export function EditorCanvas() {
   const strokeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   // Spacebar state for pan mode
   const spacePressed = useRef(false);
-  // Move tool: snapshot of the active layer when a move gesture starts
+  // Move tool: snapshot of pixels inside the selection (or whole layer)
   const moveSourceRef = useRef<HTMLCanvasElement | null>(null);
+  // Move tool: snapshot of the layer with selected pixels cleared out
+  const moveBackgroundRef = useRef<HTMLCanvasElement | null>(null);
+  // Move tool: original selectionMask at drag start (used to produce translated mask each frame)
+  const moveStartMaskRef = useRef<HTMLCanvasElement | null>(null);
   // Move tool: saved original selectionBounds so we can compute offset deltas
   const moveStartBoundsRef = useRef<typeof selectionBounds>(null);
+  // Move tool: active layer ID at drag start (mid-drag safety guard)
+  const moveStartLayerIdRef = useRef<string | null>(null);
   // Clone stamp source position
   const cloneSourceRef = useRef<Point | null>(null);
   // Clone stamp last paint position (for tracking delta)
@@ -1225,12 +1231,37 @@ export function EditorCanvas() {
       const layer = getActiveLayer();
       if (layer && !layer.locked) {
         const snap = createBlankCanvas(docWidth, docHeight);
-        snap.getContext('2d')!.drawImage(layer.canvas, 0, 0);
-        moveSourceRef.current = snap;
+        const snapCtx = snap.getContext('2d')!;
+        snapCtx.drawImage(layer.canvas, 0, 0);
+        if (selectionMask) {
+          // Clip source to just the selected pixels
+          const src = createBlankCanvas(docWidth, docHeight);
+          const srcCtx = src.getContext('2d')!;
+          srcCtx.drawImage(snap, 0, 0);
+          srcCtx.globalCompositeOperation = 'destination-in';
+          srcCtx.drawImage(selectionMask, 0, 0);
+          moveSourceRef.current = src;
+          // Keep the background (layer with selection removed)
+          const bg = createBlankCanvas(docWidth, docHeight);
+          const bgCtx = bg.getContext('2d')!;
+          bgCtx.drawImage(snap, 0, 0);
+          bgCtx.globalCompositeOperation = 'destination-out';
+          bgCtx.drawImage(selectionMask, 0, 0);
+          moveBackgroundRef.current = bg;
+          // Clone the selection mask so we can translate it each frame
+          const maskClone = createBlankCanvas(docWidth, docHeight);
+          maskClone.getContext('2d')!.drawImage(selectionMask, 0, 0);
+          moveStartMaskRef.current = maskClone;
+        } else {
+          moveSourceRef.current = snap;
+          moveBackgroundRef.current = null;
+          moveStartMaskRef.current = null;
+        }
         // Save original selection bounds so we can track the delta on each move
         moveStartBoundsRef.current = selectionBounds
           ? { x: selectionBounds.x, y: selectionBounds.y, w: selectionBounds.w, h: selectionBounds.h }
           : null;
+        moveStartLayerIdRef.current = layer.id;
       }
       return;
     }
@@ -1541,22 +1572,46 @@ export function EditorCanvas() {
     if (activeTool === 'move') {
       const layer = getActiveLayer();
       if (!layer || layer.locked || !moveSourceRef.current) return;
+      // Mid-drag safety: bail if the active layer changed externally
+      if (layer.id !== moveStartLayerIdRef.current) {
+        drawingRef.current = false;
+        moveSourceRef.current = null;
+        moveBackgroundRef.current = null;
+        moveStartMaskRef.current = null;
+        moveStartBoundsRef.current = null;
+        moveStartLayerIdRef.current = null;
+        return;
+      }
       const ctx = layer.canvas.getContext('2d')!;
       const start = startPointRef.current!;
       const dx = Math.round(pt.x - start.x);
       const dy = Math.round(pt.y - start.y);
-      // Clear and redraw the snapshot at the current offset
       ctx.clearRect(0, 0, docWidth, docHeight);
-      ctx.drawImage(moveSourceRef.current, dx, dy);
-      // Translate selection bounds so the marching ants follow the content
-      if (moveStartBoundsRef.current) {
-        const sb = moveStartBoundsRef.current;
-        setSelection(selectionMask, {
-          x: sb.x + dx,
-          y: sb.y + dy,
-          w: sb.w,
-          h: sb.h,
+      if (moveBackgroundRef.current && moveStartMaskRef.current) {
+        // Selection-aware move: draw unselected background fixed, then
+        // draw the selected pixels at the offset position.
+        ctx.drawImage(moveBackgroundRef.current, 0, 0);
+        ctx.drawImage(moveSourceRef.current, dx, dy);
+        // Translate the mask itself so marching ants match the moved pixels
+        const translatedMask = createBlankCanvas(docWidth, docHeight);
+        translatedMask.getContext('2d')!.drawImage(moveStartMaskRef.current, dx, dy);
+        setSelection(translatedMask, {
+          x: moveStartBoundsRef.current!.x + dx,
+          y: moveStartBoundsRef.current!.y + dy,
+          w: moveStartBoundsRef.current!.w,
+          h: moveStartBoundsRef.current!.h,
         });
+      } else {
+        // No selection: move the whole layer (original behavior)
+        ctx.drawImage(moveSourceRef.current, dx, dy);
+        if (moveStartBoundsRef.current) {
+          setSelection(selectionMask, {
+            x: moveStartBoundsRef.current.x + dx,
+            y: moveStartBoundsRef.current.y + dy,
+            w: moveStartBoundsRef.current.w,
+            h: moveStartBoundsRef.current.h,
+          });
+        }
       }
       composite();
       return;
@@ -1893,7 +1948,10 @@ export function EditorCanvas() {
         }
       }
       moveSourceRef.current = null;
+      moveBackgroundRef.current = null;
+      moveStartMaskRef.current = null;
       moveStartBoundsRef.current = null;
+      moveStartLayerIdRef.current = null;
       composite();
       return;
     }
