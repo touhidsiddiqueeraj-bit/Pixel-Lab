@@ -525,7 +525,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setEditingMask: (v) => set({ editingMask: v }),
   setSettingSource: (v) => set({ settingSource: v }),
 
-  setSelection: (mask, bounds) => set({ selectionMask: mask, selectionBounds: bounds }),
+  setSelection: (mask, bounds) => {
+    const prev = get().selectionBounds;
+    set({ selectionMask: mask, selectionBounds: bounds });
+    if (!prev && bounds) {
+      toast('Selection active — press Esc or click × in toolbar to clear');
+    }
+  },
   clearSelection: () => set({ selectionMask: null, selectionBounds: null }),
   selectAll: () => {
     const { docWidth, docHeight } = get();

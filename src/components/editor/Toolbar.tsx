@@ -37,6 +37,7 @@ import {
   Scissors,
   Spline as SplineIcon,
   PenTool,
+  XCircle,
 } from 'lucide-react';
 import { useEditorStore } from '@/lib/editor-store';
 import { ToolType } from '@/lib/editor-types';
@@ -128,6 +129,8 @@ export function Toolbar() {
   const background = useEditorStore((s) => s.backgroundColor);
   const swapColors = useEditorStore((s) => s.swapColors);
   const resetColors = useEditorStore((s) => s.resetColors);
+  const selectionBounds = useEditorStore((s) => s.selectionBounds);
+  const clearSelection = useEditorStore((s) => s.clearSelection);
 
   return (
     <div className="flex flex-col items-center gap-1 editor-surface border-r editor-border px-1 py-2 w-10 sm:w-12 overflow-y-auto custom-scroll shrink-0 no-select">
@@ -155,6 +158,22 @@ export function Toolbar() {
                 </TooltipContent>
               </Tooltip>
             ))}
+            {section.section === 'Selection' && selectionBounds && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={clearSelection}
+                    className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-md transition-colors touch-target text-red-400 hover:editor-surface-3"
+                  >
+                    <XCircle size={18} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right" className="text-xs">
+                  <div className="font-medium">Deselect</div>
+                  <div className="editor-text-muted">Esc or Ctrl+D</div>
+                </TooltipContent>
+              </Tooltip>
+            )}
             {si < TOOLS.length - 1 && <div className="w-6 h-px editor-border my-1" />}
           </div>
         ))}

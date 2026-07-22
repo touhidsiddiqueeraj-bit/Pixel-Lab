@@ -210,44 +210,34 @@ export function EditorCanvas() {
         // Cache contour segments — only trace when mask reference changes.
         if (selectionMask !== lastMaskRef.current) {
           lastMaskRef.current = selectionMask;
-          if (activeTool === 'marquee-rect' || activeTool === 'marquee-ellipse') {
-            contourSegmentsRef.current = [];
-          } else {
-            contourSegmentsRef.current = marchSquaresContour(selectionMask, { x, y, w, h });
-          }
+          contourSegmentsRef.current = marchSquaresContour(selectionMask, { x, y, w, h });
         }
         const segs = contourSegmentsRef.current;
         const antOffset = -(Date.now() / 80) % 8;
 
         ctx.save();
+        const drawContour = () => {
+          if (segs.length > 0) {
+            for (const seg of segs) {
+              ctx.beginPath();
+              ctx.moveTo(seg[0], seg[1]);
+              ctx.lineTo(seg[2], seg[3]);
+              ctx.stroke();
+            }
+          } else {
+            ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+          }
+        };
         // Black dash pass
         ctx.strokeStyle = '#000000';
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 4]);
         ctx.lineDashOffset = antOffset;
-        if (activeTool === 'marquee-rect' || activeTool === 'marquee-ellipse') {
-          ctx.strokeRect(x + 0.5, y + 0.5, w, h);
-        } else {
-          for (const seg of segs) {
-            ctx.beginPath();
-            ctx.moveTo(seg[0], seg[1]);
-            ctx.lineTo(seg[2], seg[3]);
-            ctx.stroke();
-          }
-        }
+        drawContour();
         // White dash pass (offset by 4px for the marching effect)
         ctx.strokeStyle = '#ffffff';
         ctx.lineDashOffset = antOffset + 4;
-        if (activeTool === 'marquee-rect' || activeTool === 'marquee-ellipse') {
-          ctx.strokeRect(x + 0.5, y + 0.5, w, h);
-        } else {
-          for (const seg of segs) {
-            ctx.beginPath();
-            ctx.moveTo(seg[0], seg[1]);
-            ctx.lineTo(seg[2], seg[3]);
-            ctx.stroke();
-          }
-        }
+        drawContour();
         ctx.restore();
       }
     }
@@ -2266,6 +2256,13 @@ export function EditorCanvas() {
         }
       }
 
+      // --- Escape clears selection if no tool-specific handler caught it ---
+      if (e.key === 'Escape' && store.selectionBounds) {
+        e.preventDefault();
+        store.clearSelection();
+        return;
+      }
+
       // --- Single-letter tool shortcuts ---
       const key = e.key.toLowerCase();
       if (TOOL_SHORTCUTS[key]) {
@@ -2415,6 +2412,7 @@ export function EditorCanvas() {
       <div className="absolute bottom-2 left-2 editor-surface/90 backdrop-blur px-2.5 py-1 rounded-md text-[10px] editor-text font-mono pointer-events-none shadow-md">
         {docWidth} × {docHeight}px · {Math.round(zoom * 100)}%
         {cursorPos && ` · ${Math.round(cursorPos.x)}, ${Math.round(cursorPos.y)}`}
+        {selectionBounds && <span className="ml-2 text-yellow-400 font-bold">● Sel</span>}
       </div>
 
       {/* Zoom controls (bottom-right, non-intrusive) */}
