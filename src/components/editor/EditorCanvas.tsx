@@ -104,11 +104,15 @@ export function EditorCanvas() {
   const cloneSourceRef = useRef<Point | null>(null);
   // Clone stamp last paint position (for tracking delta)
   const cloneLastRef = useRef<Point | null>(null);
+  // Clone stamp drag-start position (for cumulative offset)
+  const cloneStartRef = useRef<Point | null>(null);
   // Snapshot of all layers (composite) for clone sampling
   const cloneSampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   // Healing brush source (same Alt+Click workflow as clone stamp)
   const healSourceRef = useRef<Point | null>(null);
   const healSampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Healing brush drag-start position (for cumulative offset)
+  const healStartRef = useRef<Point | null>(null);
   // Pen tool: list of anchor points with optional control handles
   const penPointsRef = useRef<{ x: number; y: number; h1?: Point; h2?: Point }[]>([]);
   // Liquify last position
@@ -631,15 +635,16 @@ export function EditorCanvas() {
     ctx.restore();
   }, [activeTool, composite, getActiveLayer, layers, activeLayerId, docWidth, docHeight, toolOptions.brushOpacity]);
 
-  // Clone stamp: copies pixels from clone source (offset by delta from current pos) onto the active layer
-  const drawCloneStamp = useCallback((from: Point, to: Point) => {
+  // Clone stamp: copies pixels from clone source (offset by delta from start) onto the active layer
+  const drawCloneStamp = useCallback((to: Point) => {
     const layer = getActiveLayer();
-    if (!layer || !cloneSourceRef.current || !cloneSampleCanvasRef.current) return;
+    if (!layer || !cloneSourceRef.current || !cloneStartRef.current || !cloneSampleCanvasRef.current) return;
     const source = cloneSourceRef.current;
+    const start = cloneStartRef.current;
     const sample = cloneSampleCanvasRef.current;
-    // Compute delta: when we move from `from` to `to`, we sample from source + (to - from)
-    const dx = to.x - from.x;
-    const dy = to.y - from.y;
+    // Compute cumulative delta from drag-start
+    const dx = to.x - start.x;
+    const dy = to.y - start.y;
     const srcX = source.x + dx;
     const srcY = source.y + dy;
     const radius = Math.max(0.5, toolOptions.brushSize / 2);
@@ -689,13 +694,15 @@ export function EditorCanvas() {
   }, [getActiveLayer, toolOptions.brushSize, toolOptions.brushHardness, toolOptions.brushOpacity, selectionMask, docWidth, docHeight, composite]);
 
   // Healing brush: similar to clone stamp but uses healSpot for content-aware blending
-  const drawHealStroke = useCallback((from: Point, to: Point) => {
+  const drawHealStroke = useCallback((to: Point) => {
     const layer = getActiveLayer();
-    if (!layer || !healSourceRef.current || !healSampleCanvasRef.current) return;
+    if (!layer || !healSourceRef.current || !healStartRef.current || !healSampleCanvasRef.current) return;
     const source = healSourceRef.current;
+    const start = healStartRef.current;
     const sample = healSampleCanvasRef.current;
-    const dx = to.x - from.x;
-    const dy = to.y - from.y;
+    // Cumulative delta from drag-start
+    const dx = to.x - start.x;
+    const dy = to.y - start.y;
     const srcX = source.x + dx;
     const srcY = source.y + dy;
     const radius = Math.max(2, toolOptions.brushSize / 2);
@@ -1405,6 +1412,41 @@ export function EditorCanvas() {
           erase: activeTool === 'eraser',
         });
         previewStroke();
+      } else if (activeTool === 'smooth-tool') {
+        const r = Math.max(2, toolOptions.brushSize / 2);
+        const bx = Math.max(0, Math.floor(pt.x - r));
+        const by = Math.max(0, Math.floor(pt.y - r));
+        const bw = Math.min(layer.canvas.width - bx, Math.floor(r * 2));
+        const bh = Math.min(layer.canvas.height - by, Math.floor(r * 2));
+        if (bw > 2 && bh > 2) {
+          const ctx = layer.canvas.getContext('2d')!;
+          const imageData = ctx.getImageData(bx, by, bw, bh);
+          const data = imageData.data;
+          const tmp = new Uint8ClampedArray(data);
+          const strength = toolOptions.smoothStrength / 100;
+          for (let py = 1; py < bh - 1; py++) {
+            for (let px = 1; px < bw - 1; px++) {
+              const i = (py * bw + px) * 4;
+              let tr = 0, tg = 0, tb = 0, tw = 0;
+              const j = tmp;
+              const o = j[i - 4], a = j[(i - 4) + 3];
+              if (a) { tr += o * a; tg += j[(i - 4) + 1] * a; tb += j[(i - 4) + 2] * a; tw += a; }
+              const o2 = j[i + 4], a2 = j[(i + 4) + 3];
+              if (a2) { tr += o2 * a2; tg += j[(i + 4) + 1] * a2; tb += j[(i + 4) + 2] * a2; tw += a2; }
+              const o3 = j[i - bw * 4], a3 = j[(i - bw * 4) + 3];
+              if (a3) { tr += o3 * a3; tg += j[(i - bw * 4) + 1] * a3; tb += j[(i - bw * 4) + 2] * a3; tw += a3; }
+              const o4 = j[i + bw * 4], a4 = j[(i + bw * 4) + 3];
+              if (a4) { tr += o4 * a4; tg += j[(i + bw * 4) + 1] * a4; tb += j[(i + bw * 4) + 2] * a4; tw += a4; }
+              if (tw) {
+                data[i] = j[i] * (1 - strength) + (tr / tw) * strength;
+                data[i + 1] = j[i + 1] * (1 - strength) + (tg / tw) * strength;
+                data[i + 2] = j[i + 2] * (1 - strength) + (tb / tw) * strength;
+              }
+            }
+          }
+          ctx.putImageData(imageData, bx, by);
+          composite();
+        }
       }
       lastPointRef.current = pt;
       return;
@@ -1442,9 +1484,10 @@ export function EditorCanvas() {
         return;
       }
       drawingRef.current = true;
+      cloneStartRef.current = pt;
       cloneLastRef.current = pt;
       // Draw initial stamp
-      drawCloneStamp(pt, pt);
+      drawCloneStamp(pt);
       return;
     }
 
@@ -1476,8 +1519,9 @@ export function EditorCanvas() {
         return;
       }
       drawingRef.current = true;
-      liquifyLastRef.current = pt; // reuse for tracking last pos
-      drawHealStroke(pt, pt);
+      healStartRef.current = pt;
+      liquifyLastRef.current = pt;
+      drawHealStroke(pt);
       return;
     }
 
@@ -1780,13 +1824,23 @@ export function EditorCanvas() {
         const data = imageData.data;
         const tmp = new Uint8ClampedArray(data);
         const strength = toolOptions.smoothStrength / 100;
-        // Simple 3x3 blur with strength mix
+        // Alpha-weighted 4-neighbor blur — avoids dark halos at transparency edges
         for (let py = 1; py < h - 1; py++) {
           for (let px = 1; px < w - 1; px++) {
             const i = (py * w + px) * 4;
-            for (let c = 0; c < 3; c++) {
-              const avg = (tmp[i - 4 + c] + tmp[i + 4 + c] + tmp[i - w * 4 + c] + tmp[i + w * 4 + c]) / 4;
-              data[i + c] = tmp[i + c] * (1 - strength) + avg * strength;
+            let tr = 0, tg = 0, tb = 0, tw = 0;
+            const o1 = tmp[i - 4], a1 = tmp[(i - 4) + 3];
+            if (a1) { tr += o1 * a1; tg += tmp[(i - 4) + 1] * a1; tb += tmp[(i - 4) + 2] * a1; tw += a1; }
+            const o2 = tmp[i + 4], a2 = tmp[(i + 4) + 3];
+            if (a2) { tr += o2 * a2; tg += tmp[(i + 4) + 1] * a2; tb += tmp[(i + 4) + 2] * a2; tw += a2; }
+            const o3 = tmp[i - w * 4], a3 = tmp[(i - w * 4) + 3];
+            if (a3) { tr += o3 * a3; tg += tmp[(i - w * 4) + 1] * a3; tb += tmp[(i - w * 4) + 2] * a3; tw += a3; }
+            const o4 = tmp[i + w * 4], a4 = tmp[(i + w * 4) + 3];
+            if (a4) { tr += o4 * a4; tg += tmp[(i + w * 4) + 1] * a4; tb += tmp[(i + w * 4) + 2] * a4; tw += a4; }
+            if (tw) {
+              data[i] = tmp[i] * (1 - strength) + (tr / tw) * strength;
+              data[i + 1] = tmp[i + 1] * (1 - strength) + (tg / tw) * strength;
+              data[i + 2] = tmp[i + 2] * (1 - strength) + (tb / tw) * strength;
             }
           }
         }
@@ -1800,14 +1854,13 @@ export function EditorCanvas() {
     // Clone stamp continuous painting
     if (activeTool === 'clone-stamp') {
       const last = cloneLastRef.current ?? pt;
-      // Paint along the line from last to pt
       const dist = Math.hypot(pt.x - last.x, pt.y - last.y);
       const step = Math.max(1, toolOptions.brushSize / 4);
       const steps = Math.max(1, Math.ceil(dist / step));
       for (let i = 1; i <= steps; i++) {
         const t = i / steps;
         const p = { x: last.x + (pt.x - last.x) * t, y: last.y + (pt.y - last.y) * t };
-        drawCloneStamp(last, p);
+        drawCloneStamp(p);
       }
       cloneLastRef.current = pt;
       return;
@@ -1822,7 +1875,7 @@ export function EditorCanvas() {
       for (let i = 1; i <= steps; i++) {
         const t = i / steps;
         const p = { x: last.x + (pt.x - last.x) * t, y: last.y + (pt.y - last.y) * t };
-        drawHealStroke(last, p);
+        drawHealStroke(p);
       }
       liquifyLastRef.current = pt;
       return;

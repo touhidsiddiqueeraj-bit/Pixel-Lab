@@ -874,55 +874,61 @@ export function healSpot(
   sourceX: number,
   sourceY: number,
 ) {
-  // Sample source area and blend with destination using Poisson-like blending (simplified)
   const r = Math.max(1, Math.round(radius));
-  const imageData = ctx.getImageData(0, 0, w, h);
-  const data = imageData.data;
   const sx = Math.round(sourceX);
   const sy = Math.round(sourceY);
   const cx = Math.round(centerX);
   const cy = Math.round(centerY);
 
-  // Copy source region into destination with soft circular mask
+  // Only read the union of source and dest regions (+1px neighbor padding)
+  const pad = r + 1;
+  const readL = Math.max(0, Math.min(cx - pad, sx - pad));
+  const readT = Math.max(0, Math.min(cy - pad, sy - pad));
+  const readR = Math.min(w, Math.max(cx + pad + 1, sx + pad + 1));
+  const readB = Math.min(h, Math.max(cy + pad + 1, sy + pad + 1));
+  const readW = readR - readL;
+  const readH = readB - readT;
+  if (readW <= 0 || readH <= 0) return;
+
+  const imageData = ctx.getImageData(readL, readT, readW, readH);
+  const data = imageData.data;
+
+  const inside = (px: number, py: number) => px >= 0 && px < w && py >= 0 && py < h;
+
   for (let dy = -r; dy <= r; dy++) {
     for (let dx = -r; dx <= r; dx++) {
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist > r) continue;
-      // Soft falloff
       const alpha = Math.pow(1 - dist / r, 2);
-      const dIdx = ((cy + dy) * w + (cx + dx)) * 4;
-      const sIdx = ((sy + dy) * w + (sx + dx)) * 4;
-      if (dIdx < 0 || dIdx >= data.length || sIdx < 0 || sIdx >= data.length) continue;
-      // Blend source into destination, also average with surrounding destination pixels for healing
-      const neighbors = [
-        ((cy + dy - 1) * w + (cx + dx)) * 4,
-        ((cy + dy + 1) * w + (cx + dx)) * 4,
-        ((cy + dy) * w + (cx + dx - 1)) * 4,
-        ((cy + dy) * w + (cx + dx + 1)) * 4,
-      ];
+      const px = cx + dx;
+      const py = cy + dy;
+      const spx = sx + dx;
+      const spy = sy + dy;
+      if (!inside(px, py) || !inside(spx, spy)) continue;
+
+      const dIdx = ((py - readT) * readW + (px - readL)) * 4;
+      const sIdx = ((spy - readT) * readW + (spx - readL)) * 4;
+
+      // Destination neighbor averages with row-aware bounds
       let nr = 0, ng = 0, nb = 0, ncount = 0;
-      for (const ni of neighbors) {
-        if (ni >= 0 && ni < data.length) {
-          nr += data[ni]; ng += data[ni + 1]; nb += data[ni + 2]; ncount++;
-        }
-      }
+      if (inside(px, py - 1)) { const ni = dIdx - readW * 4; nr += data[ni]; ng += data[ni + 1]; nb += data[ni + 2]; ncount++; }
+      if (inside(px, py + 1)) { const ni = dIdx + readW * 4; nr += data[ni]; ng += data[ni + 1]; nb += data[ni + 2]; ncount++; }
+      if (inside(px - 1, py)) { const ni = dIdx - 4; nr += data[ni]; ng += data[ni + 1]; nb += data[ni + 2]; ncount++; }
+      if (inside(px + 1, py)) { const ni = dIdx + 4; nr += data[ni]; ng += data[ni + 1]; nb += data[ni + 2]; ncount++; }
+      if (ncount === 0) continue;
       const avgR = nr / ncount;
       const avgG = ng / ncount;
       const avgB = nb / ncount;
-      // Compute source's offset from its local average
-      const sNeighbors = [
-        ((sy + dy - 1) * w + (sx + dx)) * 4,
-        ((sy + dy + 1) * w + (sx + dx)) * 4,
-        ((sy + dy) * w + (sx + dx - 1)) * 4,
-        ((sy + dy) * w + (sx + dx + 1)) * 4,
-      ];
+
+      // Source neighbor averages with row-aware bounds
       let sAvgR = 0, sAvgG = 0, sAvgB = 0, sCount = 0;
-      for (const ni of sNeighbors) {
-        if (ni >= 0 && ni < data.length) {
-          sAvgR += data[ni]; sAvgG += data[ni + 1]; sAvgB += data[ni + 2]; sCount++;
-        }
-      }
+      if (inside(spx, spy - 1)) { const ni = sIdx - readW * 4; sAvgR += data[ni]; sAvgG += data[ni + 1]; sAvgB += data[ni + 2]; sCount++; }
+      if (inside(spx, spy + 1)) { const ni = sIdx + readW * 4; sAvgR += data[ni]; sAvgG += data[ni + 1]; sAvgB += data[ni + 2]; sCount++; }
+      if (inside(spx - 1, spy)) { const ni = sIdx - 4; sAvgR += data[ni]; sAvgG += data[ni + 1]; sAvgB += data[ni + 2]; sCount++; }
+      if (inside(spx + 1, spy)) { const ni = sIdx + 4; sAvgR += data[ni]; sAvgG += data[ni + 1]; sAvgB += data[ni + 2]; sCount++; }
+      if (sCount === 0) continue;
       sAvgR /= sCount; sAvgG /= sCount; sAvgB /= sCount;
+
       // Healing: blend source's structure (delta from its local avg) into destination's local avg
       const sR = data[sIdx];
       const sG = data[sIdx + 1];
@@ -935,7 +941,7 @@ export function healSpot(
       data[dIdx + 2] = Math.max(0, Math.min(255, data[dIdx + 2] * (1 - alpha) + healedB * alpha));
     }
   }
-  ctx.putImageData(imageData, 0, 0);
+  ctx.putImageData(imageData, readL, readT);
 }
 
 // ============================================================================
