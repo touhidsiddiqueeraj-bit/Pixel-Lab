@@ -310,6 +310,52 @@ export function EditorCanvas() {
       ctx.restore();
     }
 
+    // Symmetry guides: live feedback showing WHERE strokes will be mirrored
+    // (dashed mirror axes / mandala segment rays) whenever a symmetry mode
+    // is active for a tool that honors symmetry. Drawn on the overlay so it
+    // never mixes with pixels, and rebuilt automatically when the symmetry
+    // mode or segment count changes (drawOverlay deps).
+    if (toolOptions.symmetryMode !== 'none' &&
+        (activeTool === 'brush' || activeTool === 'pencil' || activeTool === 'eraser')) {
+      const cx = docWidth / 2;
+      const cy = docHeight / 2;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(0, 221, 255, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      if (toolOptions.symmetryMode === 'horizontal' || toolOptions.symmetryMode === 'quad') {
+        // H-mirror strokes across the VERTICAL center line
+        ctx.moveTo(cx + 0.5, 0);
+        ctx.lineTo(cx + 0.5, docHeight);
+      }
+      if (toolOptions.symmetryMode === 'vertical' || toolOptions.symmetryMode === 'quad') {
+        // V-mirror strokes across the HORIZONTAL center line
+        ctx.moveTo(0, cy + 0.5);
+        ctx.lineTo(docWidth, cy + 0.5);
+      }
+      if (toolOptions.symmetryMode === 'mandala') {
+        const segs = Math.max(2, Math.min(12, toolOptions.symmetrySegments));
+        const reach = Math.hypot(cx, cy) + 1; // long enough to exit any corner
+        for (let i = 0; i < segs; i++) {
+          const a = (2 * Math.PI * i) / segs;
+          ctx.moveTo(cx, cy);
+          ctx.lineTo(cx + Math.cos(a) * reach, cy + Math.sin(a) * reach);
+        }
+      }
+      ctx.stroke();
+      // Small cross at the center: marks the mirror/rotation origin.
+      ctx.setLineDash([]);
+      ctx.strokeStyle = 'rgba(0, 221, 255, 0.9)';
+      ctx.beginPath();
+      ctx.moveTo(cx - 4.5, cy + 0.5);
+      ctx.lineTo(cx + 4.5, cy + 0.5);
+      ctx.moveTo(cx + 0.5, cy - 4.5);
+      ctx.lineTo(cx + 0.5, cy + 4.5);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Selection marquee ("marching ants")
     if (selectionMask && selectionBounds) {
       const { x, y, w, h } = selectionBounds;
@@ -485,7 +531,7 @@ export function EditorCanvas() {
   // cursorPos is intentionally NOT a dependency: it is read via
   // cursorPosRef so that mouse movement does not recreate this callback (and
   // with it re-run the redraw effect and tear down the animation loop).
-  }, [selectionMask, selectionBounds, activeTool, docWidth, docHeight, showGrid, guides]);
+  }, [selectionMask, selectionBounds, activeTool, docWidth, docHeight, showGrid, guides, toolOptions.symmetryMode, toolOptions.symmetrySegments]);
 
   // Animation loop for marching ants - throttled to 15fps to save CPU.
   // Also runs when the magnetic lasso is in progress so the pulsing start
@@ -540,37 +586,72 @@ export function EditorCanvas() {
     return strokeCanvasRef.current;
   }, [docWidth, docHeight]);
 
-  // Apply symmetry: mirror a point based on symmetry mode (defined early so other callbacks can use it)
-  const applySymmetry = useCallback((p: Point): Point[] => {
+  // Scratch canvas reused across pointer-moves for the symmetry preview —
+  // allocating a fresh full-document canvas on every move caused GC churn.
+  // ensure() clears it, so it is always rebuilt from scratch by the caller.
+  const symmetryUnionRef = useRef<HTMLCanvasElement | null>(null);
+  const ensureSymmetryUnion = useCallback(() => {
+    if (!symmetryUnionRef.current || symmetryUnionRef.current.width !== docWidth || symmetryUnionRef.current.height !== docHeight) {
+      symmetryUnionRef.current = createBlankCanvas(docWidth, docHeight);
+    }
+    const c = symmetryUnionRef.current;
+    c.getContext('2d')!.clearRect(0, 0, c.width, c.height);
+    return c;
+  }, [docWidth, docHeight]);
+
+  // Draw EVERY symmetric copy of `source` onto `ctx`: the identity copy
+  // plus the mirrored/rotated twins dictated by the symmetry mode. The
+  // transforms act on the whole canvas about the document center, which is
+  // exactly equivalent to transforming each stroke point — and, unlike
+  // per-point mirroring, stays a single drawImage per copy. Used by BOTH the
+  // live preview and the stroke commit, so what you see while dragging is
+  // exactly what lands on the layer.
+  const drawSymmetryCopies = useCallback((ctx: CanvasRenderingContext2D, source: HTMLCanvasElement) => {
+    ctx.drawImage(source, 0, 0);
     const mode = toolOptions.symmetryMode;
-    if (mode === 'none') return [p];
-    const cx = docWidth / 2;
-    const cy = docHeight / 2;
-    const points: Point[] = [p];
+    if (mode === 'none') return;
+    const put = (transform: () => void) => {
+      ctx.save();
+      transform();
+      ctx.drawImage(source, 0, 0);
+      ctx.restore();
+    };
     if (mode === 'horizontal' || mode === 'quad') {
-      points.push({ x: 2 * cx - p.x, y: p.y });
+      // Mirror X about the vertical center line: x → docWidth − x
+      put(() => {
+        ctx.translate(docWidth, 0);
+        ctx.scale(-1, 1);
+      });
     }
     if (mode === 'vertical' || mode === 'quad') {
-      points.push({ x: p.x, y: 2 * cy - p.y });
+      // Mirror Y about the horizontal center line: y → docHeight − y
+      put(() => {
+        ctx.translate(0, docHeight);
+        ctx.scale(1, -1);
+      });
     }
     if (mode === 'quad') {
-      points.push({ x: 2 * cx - p.x, y: 2 * cy - p.y });
+      put(() => {
+        ctx.translate(docWidth, docHeight);
+        ctx.scale(-1, -1);
+      });
     }
     if (mode === 'mandala') {
-      const segments = Math.max(2, toolOptions.symmetrySegments);
-      const dx = p.x - cx;
-      const dy = p.y - cy;
+      // Rotate the whole stroke about the document center by 2πi/segments.
+      // The OLD commit code mapped these rotational offsets onto
+      // axis-aligned flips, which drew quad-style mirrors instead of the
+      // rotated copies a mandala promises (a 4-segment mandala produced
+      // h/v flips, not 90° rotations).
+      const segments = Math.max(2, Math.min(12, toolOptions.symmetrySegments));
       for (let i = 1; i < segments; i++) {
         const angle = (2 * Math.PI * i) / segments;
-        const cos = Math.cos(angle);
-        const sin = Math.sin(angle);
-        points.push({
-          x: cx + dx * cos - dy * sin,
-          y: cy + dx * sin + dy * cos,
+        put(() => {
+          ctx.translate(docWidth / 2, docHeight / 2);
+          ctx.rotate(angle);
+          ctx.translate(-docWidth / 2, -docHeight / 2);
         });
       }
     }
-    return points;
   }, [toolOptions.symmetryMode, toolOptions.symmetrySegments, docWidth, docHeight]);
 
   // Drawing tools: brush stroke segment
@@ -624,45 +705,27 @@ export function EditorCanvas() {
     // switch (E during a brush stroke) used to flip the commit to
     // destination-out and ERASE the layer instead of painting it.
     const isEraser = (drawingToolRef.current ?? useEditorStore.getState().activeTool) === 'eraser';
-    const symmetryPoints = applySymmetry({ x: 0, y: 0 });
-    for (const offset of symmetryPoints) {
-      ctx.save();
-      if (isEraser) {
-        ctx.globalCompositeOperation = 'destination-out';
-      }
-      if (selectionMask) {
-        const clipCanvas = createBlankCanvas(docWidth, docHeight);
-        const clipCtx = clipCanvas.getContext('2d')!;
-        clipCtx.drawImage(selectionMask, 0, 0);
-        const tmp = createBlankCanvas(docWidth, docHeight);
-        const tmpCtx = tmp.getContext('2d')!;
-        if (offset.x !== 0 || offset.y !== 0) {
-          tmpCtx.save();
-          tmpCtx.translate(offset.x === 0 ? 0 : docWidth, offset.y === 0 ? 0 : docHeight);
-          tmpCtx.scale(offset.x === 0 ? 1 : -1, offset.y === 0 ? 1 : -1);
-          tmpCtx.drawImage(strokeCanvas, 0, 0);
-          tmpCtx.restore();
-        } else {
-          tmpCtx.drawImage(strokeCanvas, 0, 0);
-        }
-        tmpCtx.globalCompositeOperation = 'destination-in';
-        tmpCtx.drawImage(clipCanvas, 0, 0);
-        ctx.drawImage(tmp, 0, 0);
-      } else {
-        if (offset.x !== 0 || offset.y !== 0) {
-          ctx.save();
-          ctx.translate(offset.x === 0 ? 0 : docWidth, offset.y === 0 ? 0 : docHeight);
-          ctx.scale(offset.x === 0 ? 1 : -1, offset.y === 0 ? 1 : -1);
-          ctx.drawImage(strokeCanvas, 0, 0);
-          ctx.restore();
-        } else {
-          ctx.drawImage(strokeCanvas, 0, 0);
-        }
-      }
-      ctx.restore();
+    // Build the union of every symmetric copy of the stroke in ONE canvas,
+    // clip it to the selection, then paint/erase it in a single pass. This
+    // mirrors what previewStroke showed live, and source-over compositing
+    // is associative, so overlapping copies stack identically to the old
+    // per-copy sequential draws.
+    const union = ensureSymmetryUnion();
+    const unionCtx = union.getContext('2d')!;
+    drawSymmetryCopies(unionCtx, strokeCanvas);
+    if (selectionMask) {
+      unionCtx.globalCompositeOperation = 'destination-in';
+      unionCtx.drawImage(selectionMask, 0, 0);
+      unionCtx.globalCompositeOperation = 'source-over';
     }
+    ctx.save();
+    if (isEraser) {
+      ctx.globalCompositeOperation = 'destination-out';
+    }
+    ctx.drawImage(union, 0, 0);
+    ctx.restore();
     refreshThumbnail(layer.id);
-  }, [getActiveLayer, selectionMask, docWidth, docHeight, refreshThumbnail, applySymmetry]);
+  }, [getActiveLayer, selectionMask, docWidth, docHeight, refreshThumbnail, ensureSymmetryUnion, drawSymmetryCopies]);
 
   const clearStrokeCanvas = useCallback(() => {
     if (strokeCanvasRef.current) {
@@ -671,13 +734,37 @@ export function EditorCanvas() {
     }
   }, []);
 
-  // Preview stroke (draw stroke canvas on top of composite)
+  // Preview stroke (draw stroke canvas on top of composite).
+  // LIVE SYMMETRY FEEDBACK: with a symmetry mode active (or a selection),
+  // the preview renders the union of every mirrored/rotated copy — not just
+  // the copy under the cursor. Previously the symmetric twins only appeared
+  // after pointer-up, so drawing with symmetry felt broken/unverifiable.
+  // The union canvas is cached in a ref (rebuilt per move) instead of being
+  // reallocated every pointermove.
   const previewStroke = useCallback(() => {
     const canvas = compositeCanvasRef.current;
     if (!canvas || !strokeCanvasRef.current) return;
     const ctx = canvas.getContext('2d')!;
+    const strokeCanvas = strokeCanvasRef.current;
+    // Use the gesture's starting tool — a mid-drag tool switch (E during a
+    // brush stroke) must not flip the preview into an erase preview either.
+    const gestureTool = drawingToolRef.current ?? activeTool;
+    const needsUnion = toolOptions.symmetryMode !== 'none' || !!selectionMask;
+    // Union of every symmetric copy, clipped to the selection — exactly the
+    // pixels commitStrokeToLayer will paint/erase, so the preview is honest.
+    const buildUnion = () => {
+      const union = ensureSymmetryUnion();
+      const unionCtx = union.getContext('2d')!;
+      drawSymmetryCopies(unionCtx, strokeCanvas);
+      if (selectionMask) {
+        unionCtx.globalCompositeOperation = 'destination-in';
+        unionCtx.drawImage(selectionMask, 0, 0);
+        unionCtx.globalCompositeOperation = 'source-over';
+      }
+      return union;
+    };
     ctx.save();
-    if (activeTool === 'eraser') {
+    if (gestureTool === 'eraser') {
       // For eraser preview, we need to show what the layer will look like after erasing
       // Re-composite first, then apply eraser as destination-out
       composite();
@@ -688,7 +775,7 @@ export function EditorCanvas() {
         const tmpCtx = tmp.getContext('2d')!;
         tmpCtx.drawImage(layer.canvas, 0, 0);
         tmpCtx.globalCompositeOperation = 'destination-out';
-        tmpCtx.drawImage(strokeCanvasRef.current, 0, 0);
+        tmpCtx.drawImage(needsUnion ? buildUnion() : strokeCanvas, 0, 0);
         // Re-composite but replace the active layer
         ctx.clearRect(0, 0, docWidth, docHeight);
         for (const l of layers) {
@@ -715,12 +802,12 @@ export function EditorCanvas() {
         ctx.save();
         ctx.globalAlpha = layer.opacity;
         ctx.globalCompositeOperation = layer.blendMode as GlobalCompositeOperation;
-        ctx.drawImage(strokeCanvasRef.current, 0, 0);
+        ctx.drawImage(needsUnion ? buildUnion() : strokeCanvas, 0, 0);
         ctx.restore();
       }
     }
     ctx.restore();
-  }, [activeTool, composite, getActiveLayer, layers, activeLayerId, docWidth, docHeight, toolOptions.brushOpacity]);
+  }, [activeTool, composite, getActiveLayer, layers, activeLayerId, docWidth, docHeight, selectionMask, toolOptions.symmetryMode, ensureSymmetryUnion, drawSymmetryCopies]);
 
   // Clone stamp: copies pixels from clone source (offset by delta from start) onto the active layer
   const drawCloneStamp = useCallback((to: Point) => {
