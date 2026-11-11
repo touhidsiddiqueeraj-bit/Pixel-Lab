@@ -11,6 +11,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🐛 Fixed
 
+#### Selection Performance Cliff (`EditorCanvas.tsx`)
+- **Root cause**: with a selection active, every pointermove re-rendered the whole component and re-ran the full overlay redraw; drags called `setSelection` per move (full-document canvas allocation + store update + contour re-trace per event); the overlay canvas backing store was reallocated on every redraw; and each marching-ants redraw issued one `stroke()` call per contour segment × 2 passes at 15fps.
+- Measured on a 1280×720 doc with a drag at ~1250 events/s: average frame time **84ms → 16.6ms (≈12fps → 60fps)**, worst frame **200ms → 16.8ms**, long frames 29/30 → 0/151.
+- Marching-ants contour is now cached as a single `Path2D` (rebuilt only when the mask reference or bounds change) — a redraw costs two `stroke()` calls instead of one per segment.
+- `drawOverlay` reads the cursor through a ref (cursorPos no longer in its deps), so mouse movement no longer recreates the callback, re-runs the redraw effect, or tears down the animation loop.
+- Status-bar cursor readout is throttled to ~12/s (drawn from a ref), so the component no longer re-renders on every pointermove.
+- Overlay canvas dimensions are only reassigned when they actually change (assigning `width`/`height` — even the same value — reallocates and clears the backing store).
+- Marquee and crop drags draw a live dashed preview directly on the overlay; the selection mask is committed once on pointer-up instead of per pointermove.
+- Move tool: the marching ants follow the drag via a translate of the cached contour; the translated mask is committed once on pointer-up.
+- Clicking a marquee tool without dragging now clears the selection (matches standard editor behaviour).
+
+#### Marching-Squares Trace Corrupted by Float Bounds (`EditorCanvas.tsx`)
+- `marchSquaresContour` indexed its typed array with `(j * w + i)` where `w` came from float pointer coordinates: fractional indices read `undefined`, so only rows/columns whose arithmetic happened to land on integers were traced — a garbled (often invisible) contour for any float-bounds selection.
+- The trace window is now integer-aligned (`floor` origin, `ceil` extent), producing correct contours for marquee/lasso selections; the function was also moved to module scope (fixes `no-use-before-define`).
+
+#### Selection Mask Actions Never Refreshed the UI (`editor-store.ts`)
+- `invertSelection`, `featherSelection`, `expandSelection`, `contractSelection` mutated the mask canvas in place and stored the same reference — zustand subscribers (and the contour cache) compare by reference, so the marching ants never updated after these operations.
+- All four now write into a fresh canvas and swap the reference; bounds widen to the full document where the operation can extend beyond the old bounds (invert/feather/expand).
+- `invertSelection` previously inverted the RGB channels and kept alpha — a functional no-op, since selection semantics (clipping and contour tracing) are driven purely by the alpha channel. It now inverts alpha.
+
+#### Pre-existing Type Errors (`editor-store.ts`, `AdjustmentsPanel.tsx`)
+- `mergeVisibleLayers` / `flattenImage`: new layers were missing required `maskCanvas` / `maskEnabled` fields.
+- `pushHistory`: removed stray `timestamp` property not present on `HistoryEntry`.
+- 19 `Slider` `onValueChange` handlers passed a `Dispatch<SetStateAction<number>>` where `(value: number[]) => void` is expected — wrapped with `(v) => setter(v[0])`.
+
 #### Lasso Overlay Rendering (`EditorCanvas.tsx`)
 - Marching-squares contour trace in `drawOverlay()` replaces bounding-box `strokeRect` for lasso, polygonal lasso, magnetic lasso, and magic wand selection paths
 - `strokeRect` preserved for marquee-rect and marquee-ellipse (correct for those tools)

@@ -213,12 +213,12 @@ export function AdjustmentsPanel() {
             <SunMedium size={12} /> Brightness
             <span className="ml-auto editor-text-dim">{brightness}</span>
           </div>
-          <Slider value={[brightness]} min={-100} max={100} step={1} onValueChange={setBrightness} />
+          <Slider value={[brightness]} min={-100} max={100} step={1} onValueChange={(v) => setBrightness(v[0])} />
           <div className="text-xs font-semibold editor-text flex items-center gap-1.5">
             <Contrast size={12} /> Contrast
             <span className="ml-auto editor-text-dim">{contrast}</span>
           </div>
-          <Slider value={[contrast]} min={-100} max={100} step={1} onValueChange={setContrast} />
+          <Slider value={[contrast]} min={-100} max={100} step={1} onValueChange={(v) => setContrast(v[0])} />
           <Button
             onClick={() => applyAdjustment('Brightness/Contrast', (ctx, w, h) => applyBrightnessContrast(ctx, w, h, brightness, contrast))}
             variant="secondary"
@@ -235,11 +235,11 @@ export function AdjustmentsPanel() {
             <Palette size={12} /> Hue
             <span className="ml-auto editor-text-dim">{hue}°</span>
           </div>
-          <Slider value={[hue]} min={-180} max={180} step={1} onValueChange={setHue} />
+          <Slider value={[hue]} min={-180} max={180} step={1} onValueChange={(v) => setHue(v[0])} />
           <div className="text-xs font-semibold editor-text">Saturation <span className="ml-auto editor-text-dim">{saturation}</span></div>
-          <Slider value={[saturation]} min={-100} max={100} step={1} onValueChange={setSaturation} />
+          <Slider value={[saturation]} min={-100} max={100} step={1} onValueChange={(v) => setSaturation(v[0])} />
           <div className="text-xs font-semibold editor-text">Lightness <span className="ml-auto editor-text-dim">{lightness}</span></div>
-          <Slider value={[lightness]} min={-100} max={100} step={1} onValueChange={setLightness} />
+          <Slider value={[lightness]} min={-100} max={100} step={1} onValueChange={(v) => setLightness(v[0])} />
           <Button
             onClick={() => applyAdjustment('Hue/Saturation', (ctx, w, h) => applyHueSaturation(ctx, w, h, hue, saturation, lightness))}
             variant="secondary"
@@ -256,7 +256,7 @@ export function AdjustmentsPanel() {
             <Thermometer size={12} /> Color Temperature
             <span className="ml-auto editor-text-dim">{temperature > 0 ? `+${temperature}` : temperature}</span>
           </div>
-          <Slider value={[temperature]} min={-100} max={100} step={1} onValueChange={setTemperature} />
+          <Slider value={[temperature]} min={-100} max={100} step={1} onValueChange={(v) => setTemperature(v[0])} />
           <Button
             onClick={() => applyAdjustment('Color Temperature', (ctx, w, h) => applyColorTemperature(ctx, w, h, temperature))}
             variant="secondary"
@@ -273,7 +273,7 @@ export function AdjustmentsPanel() {
             <Droplets size={12} /> Gaussian Blur
             <span className="ml-auto editor-text-dim">{blurRadius}px</span>
           </div>
-          <Slider value={[blurRadius]} min={0} max={30} step={0.5} onValueChange={setBlurRadius} />
+          <Slider value={[blurRadius]} min={0} max={30} step={0.5} onValueChange={(v) => setBlurRadius(v[0])} />
           <Button
             onClick={() => applyAdjustment('Gaussian Blur', (ctx, w, h) => applyFastBlur(ctx, w, h, blurRadius))}
             variant="secondary"
@@ -306,9 +306,9 @@ export function AdjustmentsPanel() {
             <Aperture size={12} /> Vignette
             <span className="ml-auto editor-text-dim">{vignetteAmount}</span>
           </div>
-          <Slider value={[vignetteAmount]} min={0} max={100} step={1} onValueChange={setVignetteAmount} />
+          <Slider value={[vignetteAmount]} min={0} max={100} step={1} onValueChange={(v) => setVignetteAmount(v[0])} />
           <div className="text-xs editor-text-muted">Size <span className="ml-auto editor-text-dim">{vignetteSize}</span></div>
-          <Slider value={[vignetteSize]} min={0} max={100} step={1} onValueChange={setVignetteSize} />
+          <Slider value={[vignetteSize]} min={0} max={100} step={1} onValueChange={(v) => setVignetteSize(v[0])} />
           <Button
             onClick={() => applyAdjustment('Vignette', (ctx, w, h) => applyVignette(ctx, w, h, vignetteAmount, vignetteSize))}
             variant="secondary"
@@ -326,7 +326,7 @@ export function AdjustmentsPanel() {
             <AudioWaveform size={12} /> Add Noise (Grain)
             <span className="ml-auto editor-text-dim">{noiseAmount}</span>
           </div>
-          <Slider value={[noiseAmount]} min={0} max={100} step={1} onValueChange={setNoiseAmount} />
+          <Slider value={[noiseAmount]} min={0} max={100} step={1} onValueChange={(v) => setNoiseAmount(v[0])} />
           <Button
             onClick={() => applyAdjustment('Add Noise', (ctx, w, h) => addNoise(ctx, w, h, noiseAmount))}
             variant="secondary"
@@ -335,7 +335,7 @@ export function AdjustmentsPanel() {
             disabled={noiseAmount <= 0}
           >Add Noise</Button>
           <div className="text-xs editor-text-muted mt-2">Denoise Radius <span className="ml-auto editor-text-dim">{denoiseRadius}</span></div>
-          <Slider value={[denoiseRadius]} min={1} max={3} step={1} onValueChange={setDenoiseRadius} />
+          <Slider value={[denoiseRadius]} min={1} max={3} step={1} onValueChange={(v) => setDenoiseRadius(v[0])} />
           <Button
             onClick={() => applyAdjustment('Denoise', (ctx, w, h) => medianDenoise(ctx, w, h, denoiseRadius))}
             variant="secondary"
@@ -352,7 +352,7 @@ export function AdjustmentsPanel() {
             <Grid3x3 size={12} /> Pixelate
             <span className="ml-auto editor-text-dim">{pixelateSize}px</span>
           </div>
-          <Slider value={[pixelateSize]} min={2} max={50} step={1} onValueChange={setPixelateSize} />
+          <Slider value={[pixelateSize]} min={2} max={50} step={1} onValueChange={(v) => setPixelateSize(v[0])} />
           <Button
             onClick={() => applyAdjustment('Pixelate', (ctx, w, h) => applyPixelate(ctx, w, h, pixelateSize))}
             variant="secondary"
@@ -360,7 +360,7 @@ export function AdjustmentsPanel() {
             className="w-full h-7 text-xs"
           >Apply Pixelate</Button>
           <div className="text-xs editor-text-muted mt-2">Posterize Levels <span className="ml-auto editor-text-dim">{posterizeLevels}</span></div>
-          <Slider value={[posterizeLevels]} min={2} max={32} step={1} onValueChange={setPosterizeLevels} />
+          <Slider value={[posterizeLevels]} min={2} max={32} step={1} onValueChange={(v) => setPosterizeLevels(v[0])} />
           <Button
             onClick={() => applyAdjustment('Posterize', (ctx, w, h) => applyPosterize(ctx, w, h, posterizeLevels))}
             variant="secondary"
@@ -415,12 +415,12 @@ export function AdjustmentsPanel() {
               <Label className="editor-text-muted">Black</Label>
               <span className="editor-text">{levelsBlack}</span>
             </div>
-            <Slider value={[levelsBlack]} min={0} max={254} step={1} onValueChange={setLevelsBlack} />
+            <Slider value={[levelsBlack]} min={0} max={254} step={1} onValueChange={(v) => setLevelsBlack(v[0])} />
             <div className="flex items-center justify-between text-xs">
               <Label className="editor-text-muted">White</Label>
               <span className="editor-text">{levelsWhite}</span>
             </div>
-            <Slider value={[levelsWhite]} min={1} max={255} step={1} onValueChange={setLevelsWhite} />
+            <Slider value={[levelsWhite]} min={1} max={255} step={1} onValueChange={(v) => setLevelsWhite(v[0])} />
             <div className="flex items-center justify-between text-xs">
               <Label className="editor-text-muted">Gamma</Label>
               <span className="editor-text">{levelsGamma.toFixed(2)}</span>
@@ -443,7 +443,7 @@ export function AdjustmentsPanel() {
               <Label className="editor-text-muted">Mid point</Label>
               <span className="editor-text">{curvesMid}</span>
             </div>
-            <Slider value={[curvesMid]} min={32} max={224} step={1} onValueChange={setCurvesMid} />
+            <Slider value={[curvesMid]} min={32} max={224} step={1} onValueChange={(v) => setCurvesMid(v[0])} />
             <Button
               onClick={() => applyAdjustment('Curves', (ctx, w, h) => applyCurves(ctx, w, h, [
                 { x: 0, y: 0 },
@@ -466,7 +466,7 @@ export function AdjustmentsPanel() {
               <Label className="editor-text-muted">Red ← Red %</Label>
               <span className="editor-text">{channelMixR}</span>
             </div>
-            <Slider value={[channelMixR]} min={0} max={200} step={1} onValueChange={setChannelMixR} />
+            <Slider value={[channelMixR]} min={0} max={200} step={1} onValueChange={(v) => setChannelMixR(v[0])} />
             <Button
               onClick={() => applyAdjustment('Channel Mixer', (ctx, w, h) => applyChannelMixer(ctx, w, h, {
                 rOut: { r: channelMixR, g: 0, b: 0 },
@@ -488,12 +488,12 @@ export function AdjustmentsPanel() {
               <Label className="editor-text-muted">Strength</Label>
               <span className="editor-text">{hdrStrength}</span>
             </div>
-            <Slider value={[hdrStrength]} min={0} max={100} step={1} onValueChange={setHdrStrength} />
+            <Slider value={[hdrStrength]} min={0} max={100} step={1} onValueChange={(v) => setHdrStrength(v[0])} />
             <div className="flex items-center justify-between text-xs">
               <Label className="editor-text-muted">Radius</Label>
               <span className="editor-text">{hdrRadius}px</span>
             </div>
-            <Slider value={[hdrRadius]} min={1} max={20} step={1} onValueChange={setHdrRadius} />
+            <Slider value={[hdrRadius]} min={1} max={20} step={1} onValueChange={(v) => setHdrRadius(v[0])} />
             <Button
               onClick={() => applyAdjustment('HDR Toning', (ctx, w, h) => applyHDRToning(ctx, w, h, hdrStrength, hdrRadius))}
               variant="secondary"

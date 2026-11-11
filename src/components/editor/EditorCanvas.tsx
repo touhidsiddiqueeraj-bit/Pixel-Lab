@@ -31,6 +31,73 @@ import { cn } from '@/lib/utils';
 
 interface Point { x: number; y: number; }
 
+/**
+ * Marching-squares contour trace of a selection mask alpha channel.
+ * Returns an array of path segment pairs (x1,y1)-(x2,y2) in canvas coords.
+ * Each segment is [x1, y1, x2, y2].
+ */
+function marchSquaresContour(
+  maskCanvas: HTMLCanvasElement,
+  bounds: { x: number; y: number; w: number; h: number },
+): number[][] {
+  // Integer-align the trace window. Selection bounds arrive as FLOATS
+  // (pointer coordinates), and float values poisoned every typed-array
+  // read below: data[(j * w + i) * 4 + 3] with a fractional w resolves to
+  // `undefined`, so only rows/columns whose index arithmetic happened to
+  // land on integers were traced — a garbled contour (or none at all).
+  const bx = Math.floor(bounds.x);
+  const by = Math.floor(bounds.y);
+  const w = Math.max(1, Math.ceil(bounds.x + bounds.w) - bx);
+  const h = Math.max(1, Math.ceil(bounds.y + bounds.h) - by);
+  if (w < 1 || h < 1) return [];
+  const ctx = maskCanvas.getContext('2d', { willReadFrequently: true })!;
+  const imgData = ctx.getImageData(bx, by, w, h);
+  const data = imgData.data;
+  const segments: number[][] = [];
+
+  // Corner alpha > 128 → inside (1). Each cell produces 0, 1, or 2 segments.
+  // Edge midpoint lookup: 1=T, 2=B, 3=L, 4=R
+  // Tables: [s1_e1, s1_e2, s2_e1, s2_e2] (0 = none)
+  const CASE: [number, number, number, number][] = [
+    [0,0,0,0],[2,4,0,0],[1,4,0,0],[1,2,0,0],
+    [2,3,0,0],[3,4,0,0],[1,4,3,2],[1,3,0,0],
+    [1,3,0,0],[1,4,3,2],[1,2,0,0],[1,4,0,0],
+    [3,4,0,0],[2,3,0,0],[2,4,0,0],[0,0,0,0],
+  ];
+
+  for (let j = 0; j < h - 1; j++) {
+    for (let i = 0; i < w - 1; i++) {
+      const tl = data[(j * w + i) * 4 + 3] > 128 ? 1 : 0;
+      const tr = data[(j * w + i + 1) * 4 + 3] > 128 ? 1 : 0;
+      const bl = data[((j + 1) * w + i) * 4 + 3] > 128 ? 1 : 0;
+      const br = data[((j + 1) * w + i + 1) * 4 + 3] > 128 ? 1 : 0;
+      const code = (tl << 3) | (tr << 2) | (bl << 1) | br;
+      const [e1, e2, e3, e4] = CASE[code];
+      if (e1) {
+        const mid = (e: number) => {
+          switch (e) {
+            case 1: return [bx + i + 0.5, by + j];       // T
+            case 2: return [bx + i + 0.5, by + j + 1];   // B
+            case 3: return [bx + i, by + j + 0.5];       // L
+            case 4: return [bx + i + 1, by + j + 0.5];   // R
+            default: return [0, 0];
+          }
+        };
+        const [x1, y1] = mid(e1);
+        const [x2, y2] = mid(e2);
+        segments.push([x1, y1, x2, y2]);
+        if (e3) {
+          const [x3, y3] = mid(e3);
+          const [x4, y4] = mid(e4);
+          segments.push([x3, y3, x4, y4]);
+        }
+      }
+    }
+  }
+  return segments;
+}
+
+
 export function EditorCanvas() {
   const layers = useEditorStore((s) => s.layers);
   const activeLayerId = useEditorStore((s) => s.activeLayerId);
@@ -63,10 +130,25 @@ export function EditorCanvas() {
   const compositeCanvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Cache for marching-ants contour segments — only recompute when mask
-  // reference changes, not every animation frame.
-  const contourSegmentsRef = useRef<number[][]>([]);
+  // Cache for marching-ants contour — rebuilt only when the mask reference
+  // or bounds change, not every animation frame. Stored as a single Path2D so
+  // a redraw costs two stroke() calls instead of one per segment (the old
+  // per-segment stroking was the main reason overlay redraws stalled the UI
+  // on complex selections).
+  const contourPathRef = useRef<Path2D | null>(null);
+  const contourHasSegmentsRef = useRef(false);
   const lastMaskRef = useRef<HTMLCanvasElement | null>(null);
+  const lastBoundsRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+  // Marquee / crop drag preview (drawn straight onto the overlay; the real
+  // selection mask is committed once on pointer-up instead of per move).
+  const marqueePreviewRef = useRef<{ x: number; y: number; w: number; h: number; ellipse: boolean } | null>(null);
+  // Move tool: live drag offset. The cached marching-ants contour is simply
+  // translated by this in drawOverlay; the translated mask is committed once
+  // on pointer-up.
+  const moveOffsetRef = useRef<{ dx: number; dy: number } | null>(null);
+  // Cursor position mirror updated on every pointermove WITHOUT triggering a
+  // React re-render (drawOverlay reads it through this ref).
+  const cursorPosRef = useRef<Point | null>(null);
 
   // Tool state
   const drawingRef = useRef(false);
@@ -123,6 +205,17 @@ export function EditorCanvas() {
   const strokePointsRef = useRef<Point[]>([]);
 
   const [cursorPos, setCursorPos] = useState<Point | null>(null);
+  // Throttled status-bar updates: re-rendering this large component on every
+  // pointermove was a major source of jank (with a selection active it also
+  // forced a full overlay redraw per move).
+  const lastCursorStateUpdateRef = useRef(0);
+  const setCursorPosThrottled = useCallback((pt: Point) => {
+    const now = performance.now();
+    if (now - lastCursorStateUpdateRef.current >= 80) {
+      lastCursorStateUpdateRef.current = now;
+      setCursorPos(pt);
+    }
+  }, []);
   const [, forceRender] = useState(0);
   const [containerSize, setContainerSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
 
@@ -161,8 +254,11 @@ export function EditorCanvas() {
   const drawOverlay = useCallback(() => {
     const canvas = overlayCanvasRef.current;
     if (!canvas) return;
-    canvas.width = docWidth;
-    canvas.height = docHeight;
+    // Only touch width/height when they actually changed — assigning them
+    // (even to the same value) reallocates and clears the backing store, which
+    // previously happened on every redraw and every animation frame.
+    if (canvas.width !== docWidth) canvas.width = docWidth;
+    if (canvas.height !== docHeight) canvas.height = docHeight;
     const ctx = canvas.getContext('2d')!;
     ctx.clearRect(0, 0, docWidth, docHeight);
 
@@ -211,23 +307,30 @@ export function EditorCanvas() {
     if (selectionMask && selectionBounds) {
       const { x, y, w, h } = selectionBounds;
       if (w > 0 && h > 0) {
-        // Cache contour segments — only trace when mask reference changes.
-        if (selectionMask !== lastMaskRef.current) {
+        // Cache the contour as ONE Path2D — trace only when the mask reference
+        // or bounds change. A redraw then costs two stroke() calls (black and
+        // white dash passes) instead of one stroke call per segment.
+        if (selectionMask !== lastMaskRef.current || selectionBounds !== lastBoundsRef.current) {
           lastMaskRef.current = selectionMask;
-          contourSegmentsRef.current = marchSquaresContour(selectionMask, { x, y, w, h });
+          lastBoundsRef.current = selectionBounds;
+          const segs = marchSquaresContour(selectionMask, { x, y, w, h });
+          const path = new Path2D();
+          for (const seg of segs) {
+            path.moveTo(seg[0], seg[1]);
+            path.lineTo(seg[2], seg[3]);
+          }
+          contourPathRef.current = path;
+          contourHasSegmentsRef.current = segs.length > 0;
         }
-        const segs = contourSegmentsRef.current;
         const antOffset = -(Date.now() / 80) % 8;
 
         ctx.save();
-        const drawContour = () => {
-          if (segs.length > 0) {
-            for (const seg of segs) {
-              ctx.beginPath();
-              ctx.moveTo(seg[0], seg[1]);
-              ctx.lineTo(seg[2], seg[3]);
-              ctx.stroke();
-            }
+        // Move-drag: translate the cached contour so the ants follow the
+        // dragged pixels without re-tracing or allocating per pointermove.
+        if (moveOffsetRef.current) ctx.translate(moveOffsetRef.current.dx, moveOffsetRef.current.dy);
+        const strokeContour = () => {
+          if (contourHasSegmentsRef.current && contourPathRef.current) {
+            ctx.stroke(contourPathRef.current);
           } else {
             ctx.strokeRect(x + 0.5, y + 0.5, w, h);
           }
@@ -237,13 +340,40 @@ export function EditorCanvas() {
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 4]);
         ctx.lineDashOffset = antOffset;
-        drawContour();
+        strokeContour();
         // White dash pass (offset by 4px for the marching effect)
         ctx.strokeStyle = '#ffffff';
         ctx.lineDashOffset = antOffset + 4;
-        drawContour();
+        strokeContour();
         ctx.restore();
       }
+    }
+
+    // Marquee / crop drag preview: drawn directly on the overlay instead of
+    // calling setSelection on every pointermove (which allocated a
+    // full-document canvas, re-rendered every subscriber, and re-traced the
+    // contour on each move — the selection "performance cliff" while
+    // dragging). The real selection is committed once on pointer-up.
+    if (marqueePreviewRef.current) {
+      const p = marqueePreviewRef.current;
+      ctx.save();
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      const drawPreview = () => {
+        if (p.ellipse) {
+          ctx.beginPath();
+          ctx.ellipse(p.x + p.w / 2, p.y + p.h / 2, Math.max(0.5, p.w / 2), Math.max(0.5, p.h / 2), 0, 0, Math.PI * 2);
+          ctx.stroke();
+        } else {
+          ctx.strokeRect(p.x + 0.5, p.y + 0.5, p.w, p.h);
+        }
+      };
+      drawPreview();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineDashOffset = 4;
+      drawPreview();
+      ctx.restore();
     }
 
     // Polygonal lasso in-progress
@@ -256,7 +386,7 @@ export function EditorCanvas() {
       ctx.beginPath();
       ctx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-      if (cursorPos) ctx.lineTo(cursorPos.x, cursorPos.y);
+      if (cursorPosRef.current) ctx.lineTo(cursorPosRef.current.x, cursorPosRef.current.y);
       ctx.stroke();
       ctx.restore();
     }
@@ -279,12 +409,12 @@ export function EditorCanvas() {
       ctx.stroke();
       // Draw a line from the last point to the cursor to show where the next
       // segment will go
-      if (cursorPos) {
+      if (cursorPosRef.current) {
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
         ctx.setLineDash([2, 4]);
         ctx.beginPath();
         ctx.moveTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
-        ctx.lineTo(cursorPos.x, cursorPos.y);
+        ctx.lineTo(cursorPosRef.current.x, cursorPosRef.current.y);
         ctx.stroke();
       }
       ctx.restore();
@@ -335,75 +465,20 @@ export function EditorCanvas() {
       ctx.beginPath();
       ctx.arc(first.x, first.y, 14, 0, Math.PI * 2);
       ctx.fill();
-      if (cursorPos) {
+      if (cursorPosRef.current) {
         ctx.strokeStyle = 'rgba(0, 255, 136, 0.6)';
         ctx.setLineDash([3, 3]);
         ctx.beginPath();
         ctx.moveTo(first.x, first.y);
-        ctx.lineTo(cursorPos.x, cursorPos.y);
+        ctx.lineTo(cursorPosRef.current.x, cursorPosRef.current.y);
         ctx.stroke();
       }
       ctx.restore();
     }
-  }, [selectionMask, selectionBounds, activeTool, cursorPos, docWidth, docHeight, showGrid, guides]);
-
-  /**
-   * Marching-squares contour trace of a selection mask alpha channel.
-   * Returns an array of path segment pairs (x1,y1)-(x2,y2) in canvas coords.
-   * Each segment is [x1, y1, x2, y2].
-   */
-  function marchSquaresContour(
-    maskCanvas: HTMLCanvasElement,
-    bounds: { x: number; y: number; w: number; h: number },
-  ): number[][] {
-    const { x: bx, y: by, w, h } = bounds;
-    if (w < 1 || h < 1) return [];
-    const ctx = maskCanvas.getContext('2d', { willReadFrequently: true })!;
-    const imgData = ctx.getImageData(bx, by, w, h);
-    const data = imgData.data;
-    const segments: number[][] = [];
-
-    // Corner alpha > 128 → inside (1). Each cell produces 0, 1, or 2 segments.
-    // Edge midpoint lookup: 1=T, 2=B, 3=L, 4=R
-    // Tables: [s1_e1, s1_e2, s2_e1, s2_e2] (0 = none)
-    const CASE: [number, number, number, number][] = [
-      [0,0,0,0],[2,4,0,0],[1,4,0,0],[1,2,0,0],
-      [2,3,0,0],[3,4,0,0],[1,4,3,2],[1,3,0,0],
-      [1,3,0,0],[1,4,3,2],[1,2,0,0],[1,4,0,0],
-      [3,4,0,0],[2,3,0,0],[2,4,0,0],[0,0,0,0],
-    ];
-
-    for (let j = 0; j < h - 1; j++) {
-      for (let i = 0; i < w - 1; i++) {
-        const tl = data[(j * w + i) * 4 + 3] > 128 ? 1 : 0;
-        const tr = data[(j * w + i + 1) * 4 + 3] > 128 ? 1 : 0;
-        const bl = data[((j + 1) * w + i) * 4 + 3] > 128 ? 1 : 0;
-        const br = data[((j + 1) * w + i + 1) * 4 + 3] > 128 ? 1 : 0;
-        const code = (tl << 3) | (tr << 2) | (bl << 1) | br;
-        const [e1, e2, e3, e4] = CASE[code];
-        if (e1) {
-          const mid = (e: number) => {
-            switch (e) {
-              case 1: return [bx + i + 0.5, by + j];       // T
-              case 2: return [bx + i + 0.5, by + j + 1];   // B
-              case 3: return [bx + i, by + j + 0.5];       // L
-              case 4: return [bx + i + 1, by + j + 0.5];   // R
-              default: return [0, 0];
-            }
-          };
-          const [x1, y1] = mid(e1);
-          const [x2, y2] = mid(e2);
-          segments.push([x1, y1, x2, y2]);
-          if (e3) {
-            const [x3, y3] = mid(e3);
-            const [x4, y4] = mid(e4);
-            segments.push([x3, y3, x4, y4]);
-          }
-        }
-      }
-    }
-    return segments;
-  }
+  // cursorPos is intentionally NOT a dependency: it is read via
+  // cursorPosRef so that mouse movement does not recreate this callback (and
+  // with it re-run the redraw effect and tear down the animation loop).
+  }, [selectionMask, selectionBounds, activeTool, docWidth, docHeight, showGrid, guides]);
 
   // Animation loop for marching ants - throttled to 15fps to save CPU.
   // Also runs when the magnetic lasso is in progress so the pulsing start
@@ -1078,7 +1153,6 @@ export function EditorCanvas() {
       // Clip to selection
       const tmp = createBlankCanvas(docWidth, docHeight);
       const tmpCtx = tmp.getContext('2d')!;
-      tmpCtx.fillStyle = gradient as unknown as string;
       // createLinearGradient returns CanvasGradient which is acceptable as fillStyle
       tmpCtx.fillStyle = gradient;
       tmpCtx.fillRect(0, 0, docWidth, docHeight);
@@ -1225,6 +1299,7 @@ export function EditorCanvas() {
     if (activeTool === 'move') {
       drawingRef.current = true;
       startPointRef.current = pt;
+      moveOffsetRef.current = null;
       const layer = getActiveLayer();
       if (layer && !layer.locked) {
         const snap = createBlankCanvas(docWidth, docHeight);
@@ -1267,6 +1342,7 @@ export function EditorCanvas() {
     if (activeTool === 'crop') {
       drawingRef.current = true;
       startPointRef.current = pt;
+      marqueePreviewRef.current = null;
       return;
     }
 
@@ -1279,6 +1355,7 @@ export function EditorCanvas() {
       }
       drawingRef.current = true;
       startPointRef.current = pt;
+      marqueePreviewRef.current = null;
       return;
     }
 
@@ -1590,10 +1667,12 @@ export function EditorCanvas() {
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const pt = toCanvasCoords(e.clientX, e.clientY);
-    // Only update cursor position display when not actively drawing
-    // (during drawing, the cursor display is not needed and causes re-renders)
+    // Mirror the cursor in a ref (no re-render) for overlay drawing; the
+    // status-bar readout is throttled so this large component doesn't
+    // re-render on every pointermove.
+    cursorPosRef.current = pt;
     if (!drawingRef.current) {
-      setCursorPos(pt);
+      setCursorPosThrottled(pt);
     }
 
     if (panStartRef.current) {
@@ -1613,6 +1692,7 @@ export function EditorCanvas() {
         moveBackgroundRef.current = null;
         moveStartMaskRef.current = null;
         moveStartBoundsRef.current = null;
+        moveOffsetRef.current = null;
         moveStartLayerIdRef.current = null;
         return;
       }
@@ -1626,54 +1706,46 @@ export function EditorCanvas() {
         // draw the selected pixels at the offset position.
         ctx.drawImage(moveBackgroundRef.current, 0, 0);
         ctx.drawImage(moveSourceRef.current, dx, dy);
-        // Translate the mask itself so marching ants match the moved pixels
-        const translatedMask = createBlankCanvas(docWidth, docHeight);
-        translatedMask.getContext('2d')!.drawImage(moveStartMaskRef.current, dx, dy);
-        setSelection(translatedMask, {
-          x: moveStartBoundsRef.current!.x + dx,
-          y: moveStartBoundsRef.current!.y + dy,
-          w: moveStartBoundsRef.current!.w,
-          h: moveStartBoundsRef.current!.h,
-        });
+        // The marching ants follow via a translate in drawOverlay; the
+        // translated mask itself is committed once on pointer-up (the old
+        // per-move setSelection allocated a full-document canvas and
+        // re-traced the contour on every single pointermove).
+        moveOffsetRef.current = { dx, dy };
+        drawOverlay();
       } else {
         // No selection: move the whole layer (original behavior)
         ctx.drawImage(moveSourceRef.current, dx, dy);
-        if (moveStartBoundsRef.current) {
-          setSelection(selectionMask, {
-            x: moveStartBoundsRef.current.x + dx,
-            y: moveStartBoundsRef.current.y + dy,
-            w: moveStartBoundsRef.current.w,
-            h: moveStartBoundsRef.current.h,
-          });
-        }
       }
       composite();
       return;
     }
 
-    // Marquee preview
+    // Marquee preview: drawn directly on the overlay during the drag; the
+    // real mask is committed once on pointer-up.
     if (activeTool === 'marquee-rect' || activeTool === 'marquee-ellipse') {
       const start = startPointRef.current!;
-      const { mask, bounds } = createRectMask(
-        Math.min(start.x, pt.x),
-        Math.min(start.y, pt.y),
-        Math.abs(pt.x - start.x),
-        Math.abs(pt.y - start.y),
-        activeTool === 'marquee-ellipse',
-      );
-      setSelection(mask, bounds);
+      marqueePreviewRef.current = {
+        x: Math.min(start.x, pt.x),
+        y: Math.min(start.y, pt.y),
+        w: Math.abs(pt.x - start.x),
+        h: Math.abs(pt.y - start.y),
+        ellipse: activeTool === 'marquee-ellipse',
+      };
+      drawOverlay();
       return;
     }
 
     if (activeTool === 'crop') {
-      // Show crop overlay
+      // Show crop preview on the overlay (no store updates per move)
       const start = startPointRef.current!;
-      // Reuse selection display for crop preview
-      const mask = createBlankCanvas(docWidth, docHeight);
-      const ctx = mask.getContext('2d')!;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(Math.min(start.x, pt.x), Math.min(start.y, pt.y), Math.abs(pt.x - start.x), Math.abs(pt.y - start.y));
-      setSelection(mask, { x: Math.min(start.x, pt.x), y: Math.min(start.y, pt.y), w: Math.abs(pt.x - start.x), h: Math.abs(pt.y - start.y) });
+      marqueePreviewRef.current = {
+        x: Math.min(start.x, pt.x),
+        y: Math.min(start.y, pt.y),
+        w: Math.abs(pt.x - start.x),
+        h: Math.abs(pt.y - start.y),
+        ellipse: false,
+      };
+      drawOverlay();
       return;
     }
 
@@ -1703,8 +1775,8 @@ export function EditorCanvas() {
       // Live preview: only redraw the overlay (cheap). The actual selection
       // mask is created on pointer-up, NOT on every move — calling
       // setSelection() here would allocate a full-document canvas on every
-      // pointermove and freeze the UI on large documents.
-      setCursorPos(pt);
+      // pointermove and freeze the UI on large documents. (The cursor is
+      // mirrored in cursorPosRef at the top of this handler.)
       drawOverlay();
       return;
     }
@@ -1896,13 +1968,18 @@ export function EditorCanvas() {
       return;
     }
   }, [
-    activeTool, toCanvasCoords, handlePan, createRectMask, setSelection,
-    createLassoMask, snapToEdge, drawOverlay, docWidth, docHeight, composite, foreground, background,
+    activeTool, toCanvasCoords, handlePan, snapToEdge, setCursorPosThrottled,
+    createLassoMask, drawOverlay, docWidth, docHeight, composite, foreground, background,
     toolOptions, drawStrokeSegment, previewStroke, drawCloneStamp, drawHealStroke, applyLiquify,
     drawShapeOnCtx, getActiveLayer, refreshThumbnail,
   ]);
 
   const onPointerUp = useCallback((e: React.PointerEvent) => {
+    // Commit the final cursor position to the status-bar state (it was
+    // throttled during the drag itself).
+    cursorPosRef.current = toCanvasCoords(e.clientX, e.clientY);
+    setCursorPos(cursorPosRef.current);
+
     if (panStartRef.current) {
       panStartRef.current = null;
       return;
@@ -1915,7 +1992,26 @@ export function EditorCanvas() {
     const start = startPointRef.current;
 
     if (activeTool === 'marquee-rect' || activeTool === 'marquee-ellipse' || activeTool === 'lasso' || activeTool === 'magnetic-lasso') {
-      // Selection already set during move. For lasso, finalize.
+      // Marquee: commit the selection once here — the drag itself only drew
+      // an overlay preview (no store writes per move).
+      if (activeTool === 'marquee-rect' || activeTool === 'marquee-ellipse') {
+        const mstart = startPointRef.current;
+        if (mstart && Math.abs(pt.x - mstart.x) >= 1 && Math.abs(pt.y - mstart.y) >= 1) {
+          const { mask, bounds } = createRectMask(
+            Math.min(mstart.x, pt.x),
+            Math.min(mstart.y, pt.y),
+            Math.abs(pt.x - mstart.x),
+            Math.abs(pt.y - mstart.y),
+            activeTool === 'marquee-ellipse',
+          );
+          setSelection(mask, bounds);
+        } else {
+          // Click without drag: clear the selection
+          clearSelection();
+        }
+        marqueePreviewRef.current = null;
+      }
+      // For lasso, finalize.
       if (activeTool === 'lasso') {
         const result = createLassoMask(lassoPointsRef.current);
         if (result) setSelection(result.mask, result.bounds);
@@ -1951,10 +2047,16 @@ export function EditorCanvas() {
     }
 
     if (activeTool === 'crop') {
-      // Apply crop: resize document to selection bounds
-      if (selectionBounds && selectionBounds.w > 5 && selectionBounds.h > 5) {
+      // Apply crop: use the dragged preview rect, or fall back to the
+      // existing selection if the user clicked without dragging.
+      const preview = marqueePreviewRef.current;
+      marqueePreviewRef.current = null;
+      const rect = preview && preview.w > 5 && preview.h > 5
+        ? preview
+        : (selectionBounds && selectionBounds.w > 5 && selectionBounds.h > 5 ? selectionBounds : null);
+      if (rect) {
         // Crop all layers
-        const { x, y, w, h } = selectionBounds;
+        const { x, y, w, h } = rect;
         const newLayers = useEditorStore.getState().layers.map((l) => {
           const newCanvas = createBlankCanvas(Math.round(w), Math.round(h));
           const ctx = newCanvas.getContext('2d')!;
@@ -1977,7 +2079,8 @@ export function EditorCanvas() {
     }
 
     // Move tool: the live preview already painted the final state into the
-    // layer canvas. We just need to push a history entry and clean up.
+    // layer canvas. Commit the translated selection ONCE (single store
+    // update + single contour re-trace), then push a history entry.
     if (activeTool === 'move') {
       const layer = getActiveLayer();
       if (layer && !layer.locked) {
@@ -1986,6 +2089,17 @@ export function EditorCanvas() {
           // If the user didn't actually move (click without drag), the
           // layer is unchanged — still push a lightweight entry so undo
           // works if they did drag.
+          if (moveStartMaskRef.current && moveStartBoundsRef.current && moveOffsetRef.current) {
+            const { dx, dy } = moveOffsetRef.current;
+            const translatedMask = createBlankCanvas(docWidth, docHeight);
+            translatedMask.getContext('2d')!.drawImage(moveStartMaskRef.current, dx, dy);
+            setSelection(translatedMask, {
+              x: moveStartBoundsRef.current.x + dx,
+              y: moveStartBoundsRef.current.y + dy,
+              w: moveStartBoundsRef.current.w,
+              h: moveStartBoundsRef.current.h,
+            });
+          }
           refreshThumbnail(layer.id);
           pushHistory('Move');
         }
@@ -1994,7 +2108,9 @@ export function EditorCanvas() {
       moveBackgroundRef.current = null;
       moveStartMaskRef.current = null;
       moveStartBoundsRef.current = null;
+      moveOffsetRef.current = null;
       moveStartLayerIdRef.current = null;
+      drawOverlay();
       composite();
       return;
     }
@@ -2067,8 +2183,9 @@ export function EditorCanvas() {
     }
   }, [
     activeTool, toCanvasCoords, panStartRef, selectionBounds, createLassoMask,
-    setSelection, pushHistory, clearSelection, gradientFill, drawShape,
+    createRectMask, setCursorPos, setSelection, pushHistory, clearSelection, gradientFill, drawShape,
     commitStrokeToLayer, clearStrokeCanvas, composite, getActiveLayer, refreshThumbnail,
+    docWidth, docHeight,
     // Magnetic lasso: drawOverlay is now called at the end of onPointerUp to
     // refresh the in-progress path (or clear it) after the gesture ends.
     drawOverlay,

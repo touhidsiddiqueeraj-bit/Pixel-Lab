@@ -428,6 +428,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         locked: false,
         canvas: merged,
         thumbnail: generateThumbnail(merged),
+        maskCanvas: null,
+        maskEnabled: false,
       };
       // Remove visible layers, add merged at bottom
       const newLayers = s.layers.filter((l) => !l.visible);
@@ -460,6 +462,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         locked: false,
         canvas: flat,
         thumbnail: generateThumbnail(flat),
+        maskCanvas: null,
+        maskEnabled: false,
       };
       return { layers: [newLayer], activeLayerId: newLayer.id };
     });
@@ -549,24 +553,40 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       set({ selectionMask: mask, selectionBounds: { x: 0, y: 0, w: 0, h: 0 } });
       return;
     }
-    const ctx = selectionMask.getContext('2d')!;
+    // A selection mask is defined by its ALPHA channel — that is what the
+    // clipping drawImage calls and the marching-ants trace read. Invert the
+    // alpha (the previous implementation inverted RGB and kept alpha, which
+    // left both the mask semantics and the ants completely unchanged).
+    const ctx = selectionMask.getContext('2d', { willReadFrequently: true })!;
     const imageData = ctx.getImageData(0, 0, docWidth, docHeight);
     const data = imageData.data;
     for (let i = 0; i < data.length; i += 4) {
-      data[i] = 255 - data[i];
-      data[i + 1] = 255 - data[i + 1];
-      data[i + 2] = 255 - data[i + 2];
-      // keep alpha
+      data[i] = 255;
+      data[i + 1] = 255;
+      data[i + 2] = 255;
+      data[i + 3] = 255 - data[i + 3];
     }
-    ctx.putImageData(imageData, 0, 0);
-    set({ selectionMask: selectionMask });
+    // Write into a fresh canvas so the reference changes — zustand
+    // subscribers (and the contour cache in EditorCanvas) compare by
+    // reference; an in-place mutation kept the same reference so nobody
+    // refreshed. The inverted selection can extend anywhere in the
+    // document, so bounds become the full document.
+    const newMask = createBlankCanvas(docWidth, docHeight);
+    newMask.getContext('2d')!.putImageData(imageData, 0, 0);
+    set({ selectionMask: newMask, selectionBounds: { x: 0, y: 0, w: docWidth, h: docHeight } });
   },
 
   featherSelection: (radius) => {
     const { selectionMask } = get();
     if (!selectionMask || radius <= 0) return;
-    featherMask(selectionMask, radius);
-    set({ selectionMask: selectionMask });
+    // Feather a COPY and swap the reference so subscribers refresh (see
+    // invertSelection for why in-place mutation is invisible to the UI).
+    const clone = createBlankCanvas(selectionMask.width, selectionMask.height);
+    clone.getContext('2d')!.drawImage(selectionMask, 0, 0);
+    featherMask(clone, radius);
+    // The feathered fringe can extend beyond the old bounds, so widen the
+    // trace window to the full document.
+    set({ selectionMask: clone, selectionBounds: { x: 0, y: 0, w: clone.width, h: clone.height } });
   },
 
   expandSelection: (pixels) => {
@@ -595,8 +615,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         dst[idx + 3] = maxAlpha;
       }
     }
-    ctx.putImageData(new ImageData(dst, docWidth, docHeight), 0, 0);
-    set({ selectionMask: selectionMask });
+    // Write the dilated mask into a FRESH canvas so the reference changes —
+    // zustand subscribers (and the contour cache in EditorCanvas) compare by
+    // reference, so mutating the old canvas in place was invisible to them.
+    // Dilation can push the selection beyond the old bounds, so widen the
+    // trace window to the full document.
+    const expanded = createBlankCanvas(docWidth, docHeight);
+    expanded.getContext('2d')!.putImageData(new ImageData(dst, docWidth, docHeight), 0, 0);
+    set({ selectionMask: expanded, selectionBounds: { x: 0, y: 0, w: docWidth, h: docHeight } });
   },
 
   contractSelection: (pixels) => {
@@ -630,8 +656,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         dst[idx + 3] = minAlpha;
       }
     }
-    ctx.putImageData(new ImageData(dst, docWidth, docHeight), 0, 0);
-    set({ selectionMask: selectionMask });
+    // Write into a fresh canvas so the reference changes (see invertSelection
+    // for why in-place mutation is invisible to subscribers). Erosion only
+    // shrinks the selection, so the old bounds remain a valid trace window.
+    const contracted = createBlankCanvas(docWidth, docHeight);
+    contracted.getContext('2d')!.putImageData(new ImageData(dst, docWidth, docHeight), 0, 0);
+    set({ selectionMask: contracted });
   },
 
   pushHistory: (label) => {
@@ -667,7 +697,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const entry: HistoryEntry = {
         id: generateId(),
         label,
-        timestamp: Date.now(),
         layers: snapshots,
         activeLayerId: s.activeLayerId,
         docWidth: s.docWidth,
