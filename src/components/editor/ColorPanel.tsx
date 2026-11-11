@@ -32,7 +32,9 @@ export function ColorPanel() {
   }, [foreground, background, editingTarget]);
   const setCurrentColor = editingTarget === 'fg' ? setForeground : setBackground;
 
-  const rgb = hexToRgb(currentColor);
+  // hexToRgb can return null for malformed strings — default to black
+  // rather than crashing on rgb.r of null.
+  const rgb = hexToRgb(currentColor) ?? { r: 0, g: 0, b: 0 };
   const [h, s, l] = rgbToHsl(rgb.r, rgb.g, rgb.b);
 
   const updateFromHsl = useCallback((newH: number, newS: number, newL: number) => {

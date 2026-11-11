@@ -22,6 +22,7 @@
 
 import { create } from 'zustand';
 import { generateId } from '@/lib/utils';
+import { abortAllAgentRequests } from './abort-registry';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -412,6 +413,13 @@ export const MODEL_OPTIONS: { value: string; label: string; hint: string }[] = [
 /** Hard cap on tool calls per agent turn. See agent-runner.ts. */
 export const MAX_TOOL_CALLS = 8;
 
+/**
+ * Hard cap on chat messages retained in memory. Tool-call chips carry raw
+ * args JSON and base64 thumbnails — an unbounded list grew steadily across
+ * a long session. Oldest messages are dropped beyond this cap.
+ */
+export const MAX_CHAT_MESSAGES = 200;
+
 const MODEL_LS_KEY = 'pixel-lab-agent-model';
 
 // Load model preference from localStorage (NON-SECRET — just a preference).
@@ -449,7 +457,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   // API key — in-memory only
   apiKey: null,
   setApiKey: (key) => set({ apiKey: key ? key.trim() || null : null }),
-  clearApiKey: () =>
+  clearApiKey: () => {
+    // Abort any in-flight requests so a cleared key can't keep spending.
+    abortAllAgentRequests();
     set({
       apiKey: null,
       status: 'idle',
@@ -458,7 +468,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       pendingWorkspace: null,
       // Cancel any in-flight run
       cancelToken: get().cancelToken + 1,
-    }),
+    });
+  },
 
   // Model preference — persisted (non-secret)
   model: loadInitialModel(),
@@ -478,7 +489,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   addMessage: (msg) => {
     const id = generateId();
     set((s) => ({
-      messages: [...s.messages, { ...msg, id, ts: Date.now() }],
+      // Cap retained messages — chips carry raw args + base64 thumbnails.
+      messages: [...s.messages, { ...msg, id, ts: Date.now() }].slice(-MAX_CHAT_MESSAGES),
     }));
     return id;
   },
@@ -507,14 +519,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           : m,
       ),
     })),
-  clearChat: () => set({
-    messages: [],
-    pendingPreview: null,
-    pendingWorkspace: null,
-    selfEval: null,
-    status: 'idle',
-    statusLine: '',
-  }),
+  clearChat: () => {
+    // A run in flight would keep appending to the cleared thread — cancel it.
+    abortAllAgentRequests();
+    set({
+      messages: [],
+      pendingPreview: null,
+      pendingWorkspace: null,
+      selfEval: null,
+      status: 'idle',
+      statusLine: '',
+      cancelToken: get().cancelToken + 1,
+    });
+  },
 
   // Pending preview + workspace (held together until Accept/Reject)
   pendingPreview: null,
@@ -530,12 +547,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   // Cancellation
   cancelToken: 0,
-  cancelRun: () =>
+  cancelRun: () => {
+    // Abort the in-flight Gemini/self-eval fetch, not just the token check.
+    abortAllAgentRequests();
     set((s) => ({
       status: 'cancelled',
       statusLine: '',
       cancelToken: s.cancelToken + 1,
-    })),
+    }));
+  },
 
   // Self-evaluation result (cleared on each new run)
   selfEval: null,

@@ -98,7 +98,9 @@ export async function importFigmaFrames(
   const imgData = await imgRes.json();
   const images: Record<string, string> = imgData.images ?? {};
 
-  // Step 2: Fetch each PNG, decode into canvas, collect results
+  // Step 2: Fetch each PNG, decode into canvas, collect results.
+  // The image is loaded ONCE — the old code fetched/decoded it a second time
+  // (imageDimensions) just to read its size.
   const results: FigmaImportResult[] = [];
   for (let i = 0; i < frameIds.length; i++) {
     const id = frameIds[i];
@@ -108,16 +110,15 @@ export async function importFigmaFrames(
       continue;
     }
 
-    const img = await fetchImageAsDataUrl(url);
-    const { width, height } = await imageDimensions(url);
-    results.push({ frameName: id, dataUrl: img, width, height });
+    const { dataUrl, width, height } = await fetchImageAsDataUrl(url);
+    results.push({ frameName: id, dataUrl, width, height });
     onProgress?.(i + 1, frameIds.length);
   }
 
   return results;
 }
 
-function fetchImageAsDataUrl(url: string): Promise<string> {
+function fetchImageAsDataUrl(url: string): Promise<{ dataUrl: string; width: number; height: number }> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -126,18 +127,9 @@ function fetchImageAsDataUrl(url: string): Promise<string> {
       c.width = img.naturalWidth;
       c.height = img.naturalHeight;
       c.getContext('2d')!.drawImage(img, 0, 0);
-      resolve(c.toDataURL('image/png'));
+      resolve({ dataUrl: c.toDataURL('image/png'), width: img.naturalWidth, height: img.naturalHeight });
     };
     img.onerror = () => reject(new Error(`Failed to load image: ${url.slice(0, 50)}...`));
-    img.src = url;
-  });
-}
-
-function imageDimensions(url: string): Promise<{ width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
-    img.onerror = () => reject(new Error('Failed to get image dimensions'));
     img.src = url;
   });
 }

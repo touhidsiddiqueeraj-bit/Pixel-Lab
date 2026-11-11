@@ -117,7 +117,9 @@ export function VectorizeDialog({ open, onClose }: VectorizeDialogProps) {
     link.href = url;
     link.download = `vectorized-${Date.now()}.svg`;
     link.click();
-    URL.revokeObjectURL(url);
+    // Defer the revoke — revoking synchronously after click() can cancel the
+    // download in Firefox/older Chrome before it starts.
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
     toast.success('SVG exported');
   }, [result]);
 

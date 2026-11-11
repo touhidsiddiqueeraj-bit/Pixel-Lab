@@ -2,12 +2,22 @@
 
 export interface RGB { r: number; g: number; b: number; }
 
-export function hexToRgb(hex: string): RGB {
-  const clean = hex.replace('#', '');
+/**
+ * Parse a hex color string into RGB. Accepts 3- and 6-digit forms.
+ * Returns null for anything malformed — callers must handle the fallback
+ * (previously a bad string produced NaN channels that silently became black).
+ */
+export function hexToRgb(hex: string): RGB | null {
+  if (typeof hex !== 'string') return null;
+  const clean = hex.replace(/^#/, '');
+  const expanded = clean.length === 3
+    ? clean.split('').map((c) => c + c).join('')
+    : clean;
+  if (!/^[0-9a-fA-F]{6}$/.test(expanded)) return null;
   return {
-    r: parseInt(clean.substring(0, 2), 16),
-    g: parseInt(clean.substring(2, 4), 16),
-    b: parseInt(clean.substring(4, 6), 16),
+    r: parseInt(expanded.substring(0, 2), 16),
+    g: parseInt(expanded.substring(2, 4), 16),
+    b: parseInt(expanded.substring(4, 6), 16),
   };
 }
 
@@ -426,6 +436,12 @@ export function removeColor(
 
 // Generate a thumbnail data URL from a canvas
 export function generateThumbnail(canvas: HTMLCanvasElement, maxSize = 48): string {
+  // Guard non-finite / non-positive dims (possible with corrupted state) —
+  // ratio = w/0 = Infinity would make the tmp canvas wrap to 0×0.
+  if (!Number.isFinite(canvas.width) || !Number.isFinite(canvas.height)
+    || canvas.width < 1 || canvas.height < 1) {
+    return '';
+  }
   const ratio = canvas.width / canvas.height;
   let tw = maxSize, th = maxSize;
   if (ratio > 1) {
@@ -450,11 +466,41 @@ export function canvasToDataUrl(canvas: HTMLCanvasElement): string {
   return canvas.toDataURL('image/png');
 }
 
-// Create a new blank canvas of given size
+/** Hard safety limits for canvas allocation (browsers cap edge at ~32k but
+ * allocate lazily — a 30000×30000 request freezes/OOMs the tab long before
+ * any explicit error). 16384 px edge / 256 MP area covers every realistic
+ * document while blocking "dimension bomb" images. */
+export const MAX_CANVAS_EDGE = 16384;
+export const MAX_CANVAS_AREA = 268_435_456; // 256 megapixels
+
+/**
+ * Clamp an image/document size into the canvas safety limits, preserving
+ * aspect ratio. Returns the (possibly downscaled) integer dimensions.
+ */
+export function clampImageSize(w: number, h: number): { w: number; h: number } {
+  let cw = Math.max(1, Math.floor(Number.isFinite(w) ? w : 1));
+  let ch = Math.max(1, Math.floor(Number.isFinite(h) ? h : 1));
+  const scaleForEdge = Math.min(1, MAX_CANVAS_EDGE / cw, MAX_CANVAS_EDGE / ch);
+  cw = Math.max(1, Math.floor(cw * scaleForEdge));
+  ch = Math.max(1, Math.floor(ch * scaleForEdge));
+  const scaleForArea = Math.min(1, MAX_CANVAS_AREA / (cw * ch));
+  return { w: Math.max(1, Math.floor(cw * scaleForArea)), h: Math.max(1, Math.floor(ch * scaleForArea)) };
+}
+
+// Create a new blank canvas of given size.
+// Validates dimensions: a non-integer or negative value silently wraps via
+// WebIDL (e.g. -5 → 4294967291) and every subsequent getImageData throws
+// IndexSizeError, so we fail fast with a descriptive error instead.
 export function createBlankCanvas(w: number, h: number): HTMLCanvasElement {
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w < 1 || h < 1
+    || w > MAX_CANVAS_EDGE || h > MAX_CANVAS_EDGE || w * h > MAX_CANVAS_AREA) {
+    throw new RangeError(
+      `Invalid canvas dimensions ${w}×${h} (max ${MAX_CANVAS_EDGE}px edge / ${MAX_CANVAS_AREA}px area)`,
+    );
+  }
   const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
+  c.width = Math.floor(w);
+  c.height = Math.floor(h);
   return c;
 }
 
@@ -655,14 +701,16 @@ export function applyVignette(ctx: CanvasRenderingContext2D, w: number, h: numbe
   const cx = w / 2;
   const cy = h / 2;
   const maxDist = Math.sqrt(cx * cx + cy * cy);
-  const innerRadius = (size / 100) * maxDist;
+  const innerRadius = Math.min((size / 100) * maxDist, maxDist * 0.999);
   const outerRadius = maxDist;
+  const radialSpan = Math.max(1e-6, outerRadius - innerRadius);
   applyPixelTransform(ctx, w, h, (r, g, b, a, x, y) => {
     const dx = x - cx;
     const dy = y - cy;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist <= innerRadius) return [r, g, b, a];
-    const t = Math.min(1, (dist - innerRadius) / (outerRadius - innerRadius));
+    // Guard: size=100 made innerRadius == outerRadius → 0/0 = NaN → whole image black.
+    const t = Math.min(1, (dist - innerRadius) / radialSpan);
     const factor = 1 - (amount / 100) * t;
     return [r * factor, g * factor, b * factor, a];
   });
@@ -672,7 +720,9 @@ export function applyVignette(ctx: CanvasRenderingContext2D, w: number, h: numbe
 export function applyEdgeDetect(ctx: CanvasRenderingContext2D, w: number, h: number) {
   const imageData = ctx.getImageData(0, 0, w, h);
   const src = imageData.data;
-  const dst = new Uint8ClampedArray(src.length);
+  // Start from a copy of the source so the 1px border (never visited by the
+  // Sobel loop) stays opaque instead of becoming a transparent ring.
+  const dst = new Uint8ClampedArray(src);
   // Convert to grayscale first
   const gray = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) {
@@ -698,7 +748,9 @@ export function applyEdgeDetect(ctx: CanvasRenderingContext2D, w: number, h: num
 export function applyEmboss(ctx: CanvasRenderingContext2D, w: number, h: number) {
   const imageData = ctx.getImageData(0, 0, w, h);
   const src = imageData.data;
-  const dst = new Uint8ClampedArray(src.length);
+  // Start from a copy so the unvisited 1px border keeps its original pixels
+  // (was fully transparent after the filter).
+  const dst = new Uint8ClampedArray(src);
   const kernel = [-2, -1, 0, -1, 1, 1, 0, 1, 2];
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
@@ -744,6 +796,8 @@ export function applyPixelate(ctx: CanvasRenderingContext2D, w: number, h: numbe
 
 // Posterize - reduce number of colors
 export function applyPosterize(ctx: CanvasRenderingContext2D, w: number, h: number, levels: number) {
+  // levels < 2 → step = 255/(levels-1) is Infinity or negative → NaN → black image.
+  if (!Number.isFinite(levels) || levels < 2) return;
   const step = 255 / (levels - 1);
   applyPixelTransform(ctx, w, h, (r, g, b, a) => [
     Math.round(Math.round(r / step) * step),
@@ -1638,8 +1692,9 @@ export function applyLensVignette(
   const cx = w / 2;
   const cy = h / 2;
   const maxDist = Math.sqrt(cx * cx + cy * cy);
-  const innerR = (midpoint / 100) * maxDist;
+  const innerR = Math.min((midpoint / 100) * maxDist, maxDist * 0.999);
   const outerR = maxDist;
+  const radialSpan = Math.max(1e-6, outerR - innerR);
   const roundFactor = roundness / 100;
   const featherFactor = Math.max(0.01, feather / 100);
   const darken = -amount / 100;
@@ -1653,7 +1708,8 @@ export function applyLensVignette(
       const dy = (y - cy) * aspectAdjust;
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist <= innerR) continue;
-      let t = (dist - innerR) / (outerR - innerR);
+      // Guard: midpoint=100 made innerR == outerR → ±Infinity → white blowout.
+      let t = (dist - innerR) / radialSpan;
       t = Math.min(1, t / featherFactor);
       const factor = 1 + darken * t;
       const i = (y * w + x) * 4;
@@ -1802,37 +1858,64 @@ export function contentAwareFill(
   w: number, h: number,
   mask: HTMLCanvasElement, // white = fill area
 ) {
+  // Mask may be sized differently from the layer (stale selection after a
+  // crop/resize); read the mask at its own size to avoid IndexSizeError.
+  const mw = Math.min(w, mask.width);
+  const mh = Math.min(h, mask.height);
   const imageData = ctx.getImageData(0, 0, w, h);
   const data = imageData.data;
   const maskCtx = mask.getContext('2d', { willReadFrequently: true })!;
-  const maskData = maskCtx.getImageData(0, 0, w, h).data;
+  const maskData = maskCtx.getImageData(0, 0, mw, mh).data;
+  const inMask = (x: number, y: number) =>
+    x >= 0 && x < mw && y >= 0 && y < mh
+      ? maskData[(y * mw + x) * 4 + 3] >= 128
+      : false;
 
-  // For each masked pixel, sample surrounding non-masked pixels and average
+  // For each masked pixel, sample surrounding non-masked pixels and average.
+  // A single fixed-radius pass leaves the interior of any region wider than
+  // ~2×radius completely untouched, so we iterate: each pass treats pixels
+  // filled by the previous pass as valid sources, growing the fill inward
+  // from the boundary until nothing changes (or the pass cap is hit).
   const radius = 20;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const mIdx = (y * w + x) * 4;
-      if (maskData[mIdx + 3] < 128) continue; // not in mask
-      // Sample surrounding pixels
-      let r = 0, g = 0, b = 0, a = 0, count = 0;
-      for (let dy = -radius; dy <= radius; dy += 4) {
-        for (let dx = -radius; dx <= radius; dx += 4) {
-          const nx = Math.max(0, Math.min(w - 1, x + dx));
-          const ny = Math.max(0, Math.min(h - 1, y + dy));
-          const nIdx = (ny * w + nx) * 4;
-          if (maskData[nIdx + 3] >= 128) continue; // skip other masked pixels
-          r += data[nIdx]; g += data[nIdx + 1]; b += data[nIdx + 2]; a += data[nIdx + 3];
-          count++;
+  const MAX_PASSES = 12;
+  const filledMarker = new Uint8Array(w * h);
+  for (let pass = 0; pass < MAX_PASSES; pass++) {
+    let filledThisPass = 0;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const mIdx = (y * w + x) * 4;
+        if (!inMask(x, y)) continue;
+        // Skip pixels already filled in an earlier pass — they are now sources.
+        if (pass > 0 && filledMarker[y * w + x]) continue;
+        // Sample surrounding pixels
+        let r = 0, g = 0, b = 0, a = 0, count = 0;
+        for (let dy = -radius; dy <= radius; dy += 4) {
+          for (let dx = -radius; dx <= radius; dx += 4) {
+            const nx = Math.max(0, Math.min(w - 1, x + dx));
+            const ny = Math.max(0, Math.min(h - 1, y + dy));
+            if (inMask(nx, ny)) {
+              // Allow sampling pixels already filled by a previous pass —
+              // that is what makes the fill grow inward.
+              if (pass === 0) continue;
+              if (!filledMarker[ny * w + nx]) continue;
+            }
+            const nIdx = (ny * w + nx) * 4;
+            r += data[nIdx]; g += data[nIdx + 1]; b += data[nIdx + 2]; a += data[nIdx + 3];
+            count++;
+          }
+        }
+        if (count > 0) {
+          const noise = (Math.random() - 0.5) * 10;
+          data[mIdx] = r / count + noise;
+          data[mIdx + 1] = g / count + noise;
+          data[mIdx + 2] = b / count + noise;
+          data[mIdx + 3] = a / count;
+          filledMarker[y * w + x] = 1;
+          filledThisPass++;
         }
       }
-      if (count > 0) {
-        const noise = (Math.random() - 0.5) * 10;
-        data[mIdx] = r / count + noise;
-        data[mIdx + 1] = g / count + noise;
-        data[mIdx + 2] = b / count + noise;
-        data[mIdx + 3] = a / count;
-      }
     }
+    if (filledThisPass === 0) break;
   }
   ctx.putImageData(imageData, 0, 0);
 }

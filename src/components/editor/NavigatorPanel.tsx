@@ -41,11 +41,22 @@ export function NavigatorPanel() {
   const [customPresets, setCustomPresets] = useState<BrushPreset[]>([]);
   const [, setTick] = useState(0);
 
-  // Load custom presets
+  // Load custom presets (shape-validated: a corrupted/tampered
+  // localStorage value previously flowed NaN geometry into the brush)
   useEffect(() => {
     const load = () => {
       try {
-        setCustomPresets(JSON.parse(localStorage.getItem('brush-presets') || '[]'));
+        const parsed = JSON.parse(localStorage.getItem('brush-presets') || '[]');
+        setCustomPresets(
+          Array.isArray(parsed)
+            ? parsed.filter((p): p is BrushPreset =>
+                typeof p === 'object' && p !== null
+                && typeof p.name === 'string'
+                && Number.isFinite(p.size) && typeof p.size === 'number'
+                && Number.isFinite(p.hardness) && typeof p.hardness === 'number'
+                && Number.isFinite(p.opacity) && typeof p.opacity === 'number')
+            : [],
+        );
       } catch {
         setCustomPresets([]);
       }

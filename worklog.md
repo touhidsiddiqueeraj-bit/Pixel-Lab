@@ -249,3 +249,40 @@ Stage Summary:
 - All 7 existing docs updated to reflect the 3 features from this session (magnetic lasso fix, mobile redesign, Luna self-eval + preference memory).
 - 1 new doc created (CHANGELOG.md) + 1 new bundle manifest (INDEX.md).
 - All 8 docs packaged into /home/z/my-project/download/pixel-lab-docs-v0.3.0.zip.
+
+---
+Task ID: pixel-lab-bugfix-v2
+Agent: main (Super Z)
+Task: Full-codebase bug hunt + security hardening pass (post selection-perf fix). Find and fix remaining bugs and security vulnerabilities, then push to main.
+
+Work Log:
+- Audited the entire codebase (~37k lines) with four parallel deep reviews: agent tools+runner, editor-store+image-processing, EditorCanvas+shortcuts, and the UI panels. Every reported finding was verified against the actual code before fixing.
+
+Security fixes:
+- mcp/server.ts (CRITICAL): WebSocket bridge bound to all interfaces with no Origin validation — any website in the user's browser could connect to ws://localhost:3004, displace the Pixel Lab tab (browserSocket last-one-wins), invoke editing tools, spoof results, and receive canvas snapshots; LAN machines could connect directly. Now: 127.0.0.1 bind, Origin allowlist (loopback + PIXEL_LAB_ALLOWED_ORIGIN env), 1008 rejection of foreign/header-less origins, 4000 supersession close. Verified with an automated 4-case test (all pass).
+- Dimension bombs: createBlankCanvas/newDocument/openImage/batch/Image Size now validate + clamp (16384px edge / 256MP area) — a 2KB crafted PNG declaring 65535×65535 previously froze/OOMed the tab.
+- AgentPanel API-key input: autoComplete current-password → off (browser password manager could persist/sync the Gemini key).
+- Ctrl+S/Ctrl+Shift+S exports ignored layer masks → masked-out pixels leaked into output files. All export paths now share a mask-aware compositor with try/catch.
+- localStorage loads (brush presets, automations) shape-validated; getCanvasSnapshot capped at 512px; chat capped at 200 messages; download filenames sanitized.
+
+Bug fixes (highlights, ~50 total — see CHANGELOG for the full list):
+- Marching-ants: CASE table rows 2↔4/3↔5 transposed (scrambled ants on left/top edges) + trace window missed the outer boundary ring (gaps/no contour for rectangular regions).
+- Undo/redo: fire-and-forget async restores raced (last decoder won, index/content desync, silent data loss on mid-restore paint) → serialized restore queue + isRestoring guard; loadIntoCanvas now rejects on decode error.
+- Agent: self-eval retries compounded on the mutated original; 64×64 diff dropped small edits silently; self-eval sent full-res JPEGs (10-20MB); AbortController never aborted (new abort-registry wires cancelRun/clearApiKey/clearChat); runRecipe could recurse infinitely and persisted the crash to localStorage (now whitelisted + depth/step caps); adjustDevelop/fillBucket ignored the selection; agent invertSelection was an RGB-only no-op (now alpha) and empty-invert = select all.
+- EditorCanvas: passive wheel handler let the browser page-zoom on pinch (now non-passive + cursor-anchored zoom); brush stabilizer seed leaked across strokes (stray connector lines); mid-drag tool switch turned brush strokes into erases (gesture tool captured at pointerdown); pointercancel committed stale coords; right-click painted; shortcuts fired inside Radix dialogs/sliders; Shift+[ hardenshirt unreachable; Ctrl+0 now fits; Space pan stuck on blur; polygonal-lasso preview never rendered; crop resampled at fractional offsets + didn't crop masks; brush opacity doubled in preview; selectionMask/selectionBounds missing from onPointerDown deps (stale closures).
+- Ctrl+X / Ctrl+Shift+J were copy-only — now actually cut (destination-out through mask + history entry).
+- File open: new openImage store action (dimension clamps, synchronous commit — the old 50-100ms setTimeout raced concurrent opens onto the wrong document; no onerror = silent failure + ObjectURL leaks); Open Recent populated by all paths with 512px thumbnails; batch processing no longer hangs forever on an undecodable file.
+- Filters: posterize levels<2 → black image; vignette size=100 / lens midpoint=100 → NaN/Infinity destroyed image; edge-detect/emboss left a transparent 1px border; hexToRgb NaN channels; contentAwareFill only filled within 20px of the boundary (now iterative); newDocument 'transparent' → black background.
+- Merges/flatten ignored layer masks (masked pixels resurrected); reorderLayers could splice undefined; selection ops used doc dims on stale masks (IndexSizeError) + uncapped expand/contract radius (frozen tab); resize now rescales masks and clears stale selections.
+- UI: auto-fit reset user zoom on every container resize; mobile Undo/Redo stale disabled state; panel state clobbered on every resize; snap-grid toast inverted; JSON recipe textareas reverted typing; Figma import decoded images twice; SVG export objectURL revoked too early (Firefox download cancel).
+
+Verification:
+- tsc --noEmit: 0 new errors (pre-existing examples/, use-toast, vectorize.ts errors unchanged and excluded by the repo's ignoreBuildErrors).
+- eslint on all 16 changed files: 0 errors, 0 warnings (was 5 problems).
+- bun run build: compiled successfully, static pages generated.
+- MCP origin validation: automated 4-case test — evil origin rejected (1008), no-origin rejected (1008), loopback accepted, stale tab superseded (4000). All PASS.
+- MCP server smoke test: starts cleanly, binds ws://127.0.0.1:3004.
+
+Stage Summary:
+- 16 files changed (15 modified + 1 new: src/lib/agent/abort-registry.ts).
+- 1 critical security vulnerability closed (MCP bridge), 4 more hardening fixes, ~50 correctness bugs fixed across rendering, history, selections, agent, input handling, file I/O, filters, and UI state.

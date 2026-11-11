@@ -36,6 +36,7 @@ import { Layers, History, Palette, SlidersHorizontal, Menu, PanelRight, Spline, 
 import { ToolType } from '@/lib/editor-types';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 type PanelTab = 'layers' | 'adjust' | 'develop' | 'color' | 'history' | 'nav' | 'agent' | 'automations';
 
@@ -155,6 +156,12 @@ export function PhotoEditor() {
   const setDocName = useEditorStore((s) => s.setDocName);
   const layers = useEditorStore((s) => s.layers);
   const zoom = useEditorStore((s) => s.zoom);
+  // Subscribe to history reactively: the mobile Undo/Redo buttons used
+  // `getState()` in their `disabled` prop, which only re-evaluates when this
+  // component re-renders — pushHistory doesn't touch `layers` (strokes mutate
+  // canvases in place), so the buttons stayed stale right after an edit.
+  const historyIndex = useEditorStore((s) => s.historyIndex);
+  const historyLength = useEditorStore((s) => s.history.length);
   // Subscribe to agent state so the floating bubble can reflect:
   //  - whether the API key is set (pulse to draw attention if not)
   //  - whether a run is in progress (show spinner)
@@ -166,16 +173,18 @@ export function PhotoEditor() {
   // clients (Claude Desktop, etc.) can call Pixel Lab's tools. Auto-reconnects.
   const mcpState = useMcpBridge();
 
-  // Detect mobile viewport
+  // Detect mobile viewport — apply the default panel state only when the
+  // breakpoint is CROSSED, not on every resize event (mobile URL-bar
+  // show/hide fires resize; re-applying the default destroyed the user's
+  // explicit panel toggle every time).
   useEffect(() => {
+    let wasMobile: boolean | null = null;
     const check = () => {
       const mobile = window.innerWidth < 768;
+      const crossed = wasMobile !== null && mobile !== wasMobile;
+      wasMobile = mobile;
       setIsMobile(mobile);
-      if (mobile) {
-        setPanelOpen(false);
-      } else {
-        setPanelOpen(true);
-      }
+      if (crossed) setPanelOpen(!mobile);
     };
     check();
     window.addEventListener('resize', check);
@@ -219,23 +228,23 @@ export function PhotoEditor() {
       input.onchange = () => {
         const file = input.files?.[0];
         if (!file) return;
+        if (!file.type.startsWith('image/')) {
+          toast.error(`"${file.name}" is not an image file`);
+          return;
+        }
         const url = URL.createObjectURL(file);
         const img = new Image();
         img.onload = () => {
-          const state = useEditorStore.getState();
-          state.newDocument(img.naturalWidth, img.naturalHeight, '#ffffff');
-          setTimeout(() => {
-            const layerId = state.addLayer(file.name.replace(/\.[^/.]+$/, ''));
-            const newState = useEditorStore.getState();
-            const layer = newState.layers.find((l) => l.id === layerId);
-            if (layer) {
-              const ctx = layer.canvas.getContext('2d')!;
-              ctx.drawImage(img, 0, 0);
-              newState.refreshThumbnail(layerId);
-              newState.pushHistory('Open ' + file.name);
-            }
-            URL.revokeObjectURL(url);
-          }, 100);
+          // openImage validates/clamps dimensions, commits synchronously
+          // (no setTimeout race with another open/new), and pushes history.
+          useEditorStore.getState().openImage(img, file.name.replace(/\.[^/.]+$/, ''), `Open ${file.name}`);
+          URL.revokeObjectURL(url);
+        };
+        // Without onerror, a corrupt file left the object URL leaked and
+        // the user with no feedback at all.
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          toast.error(`Could not read "${file.name}" — the file may be corrupt`);
         };
         img.src = url;
       };
@@ -245,47 +254,60 @@ export function PhotoEditor() {
     return () => window.removeEventListener('pixel-lab-open-file', handler);
   }, []);
 
-  // Listen for quick export events (Ctrl+S, Ctrl+Shift+S)
+  // Listen for quick export events (Ctrl+S, Ctrl+Shift+S).
+  // Shared mask-aware compositor: the keyboard export path previously
+  // ignored layer masks, so Ctrl+S exported the MASKED-OUT pixels — a silent
+  // content leak in the output file (the menu/title-bar exports did honor
+  // masks, so the three export buttons disagreed with each other).
   useEffect(() => {
-    const quickExport = () => {
-      const state = useEditorStore.getState();
+    const flattenDoc = (state: ReturnType<typeof useEditorStore.getState>, background: string | null): HTMLCanvasElement => {
       const flat = document.createElement('canvas');
       flat.width = state.docWidth;
       flat.height = state.docHeight;
       const ctx = flat.getContext('2d')!;
+      if (background) {
+        ctx.fillStyle = background;
+        ctx.fillRect(0, 0, flat.width, flat.height);
+      }
       for (const layer of state.layers) {
         if (!layer.visible) continue;
         ctx.save();
         ctx.globalAlpha = layer.opacity;
         ctx.globalCompositeOperation = layer.blendMode as GlobalCompositeOperation;
-        ctx.drawImage(layer.canvas, 0, 0);
+        if (layer.maskCanvas && layer.maskEnabled) {
+          const tmp = document.createElement('canvas');
+          tmp.width = state.docWidth; tmp.height = state.docHeight;
+          const tctx = tmp.getContext('2d')!;
+          tctx.drawImage(layer.canvas, 0, 0);
+          tctx.globalCompositeOperation = 'destination-in';
+          tctx.drawImage(layer.maskCanvas, 0, 0);
+          ctx.drawImage(tmp, 0, 0);
+        } else {
+          ctx.drawImage(layer.canvas, 0, 0);
+        }
         ctx.restore();
       }
-      const link = document.createElement('a');
-      link.href = flat.toDataURL('image/png');
-      link.download = `${state.docName.replace(/\.[^/.]+$/, '')}.png`;
-      link.click();
+      return flat;
+    };
+    const download = (canvas: HTMLCanvasElement, mime: string, quality: number, ext: string) => {
+      const state = useEditorStore.getState();
+      try {
+        const link = document.createElement('a');
+        link.href = canvas.toDataURL(mime, quality);
+        link.download = `${state.docName.replace(/\.[^/.]+$/, '')}.${ext}`;
+        link.click();
+        toast.success(`Exported as ${ext.toUpperCase()}`);
+      } catch {
+        toast.error('Export failed — the document may be too large for this browser');
+      }
+    };
+    const quickExport = () => {
+      const state = useEditorStore.getState();
+      download(flattenDoc(state, null), 'image/png', 1, 'png');
     };
     const exportJpeg = () => {
       const state = useEditorStore.getState();
-      const flat = document.createElement('canvas');
-      flat.width = state.docWidth;
-      flat.height = state.docHeight;
-      const ctx = flat.getContext('2d')!;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, flat.width, flat.height);
-      for (const layer of state.layers) {
-        if (!layer.visible) continue;
-        ctx.save();
-        ctx.globalAlpha = layer.opacity;
-        ctx.globalCompositeOperation = layer.blendMode as GlobalCompositeOperation;
-        ctx.drawImage(layer.canvas, 0, 0);
-        ctx.restore();
-      }
-      const link = document.createElement('a');
-      link.href = flat.toDataURL('image/jpeg', 0.9);
-      link.download = `${state.docName.replace(/\.[^/.]+$/, '')}.jpg`;
-      link.click();
+      download(flattenDoc(state, '#ffffff'), 'image/jpeg', 0.9, 'jpg');
     };
     window.addEventListener('pixel-lab-quick-export', quickExport);
     window.addEventListener('pixel-lab-export-jpeg', exportJpeg);
@@ -365,21 +387,16 @@ export function PhotoEditor() {
         const url = URL.createObjectURL(file);
         const img = new Image();
         img.onload = () => {
-          const state = useEditorStore.getState();
-          state.newDocument(img.naturalWidth, img.naturalHeight, '#ffffff');
-          setTimeout(() => {
-            const layerId = state.addLayer(file.name.replace(/\.[^/.]+$/, ''));
-            const newState = useEditorStore.getState();
-            const layer = newState.layers.find((l) => l.id === layerId);
-            if (layer) {
-              const ctx = layer.canvas.getContext('2d')!;
-              ctx.drawImage(img, 0, 0);
-              newState.refreshThumbnail(layerId);
-              newState.pushHistory('Drag & Drop Import');
-              newState.addRecentFile(file.name, layer.canvas.toDataURL('image/jpeg', 0.7));
-            }
-            URL.revokeObjectURL(url);
-          }, 100);
+          // openImage: dimension validation/clamping, synchronous commit,
+          // one history entry, and a downscaled recent-file thumbnail
+          // (the old path stored a full-resolution JPEG data URL of every
+          // dropped file in the recent list — multi-MB strings each).
+          useEditorStore.getState().openImage(img, file.name.replace(/\.[^/.]+$/, ''), 'Drag & Drop Import');
+          URL.revokeObjectURL(url);
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          toast.error(`Could not read "${file.name}" — the file may be corrupt`);
         };
         img.src = url;
       }}
@@ -442,7 +459,7 @@ export function PhotoEditor() {
               variant="ghost"
               size="icon"
               onClick={() => useEditorStore.getState().undo()}
-              disabled={!useEditorStore.getState().canUndo()}
+              disabled={historyIndex <= 0}
               className="h-9 w-9 editor-text-muted hover:editor-surface-3"
               title="Undo (Ctrl+Z)"
             >
@@ -452,7 +469,7 @@ export function PhotoEditor() {
               variant="ghost"
               size="icon"
               onClick={() => useEditorStore.getState().redo()}
-              disabled={!useEditorStore.getState().canRedo()}
+              disabled={historyIndex >= historyLength - 1}
               className="h-9 w-9 editor-text-muted hover:editor-surface-3"
               title="Redo (Ctrl+Y)"
             >

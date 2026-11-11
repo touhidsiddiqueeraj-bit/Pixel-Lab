@@ -33,6 +33,39 @@
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
+import type { IncomingMessage } from 'http';
+
+// ---------------------------------------------------------------------------
+// SECURITY — this server bridges an MCP client (stdio) to the browser tab
+// (WebSocket). It can mutate the user's document, so the WebSocket side must
+// not be reachable by arbitrary web pages or other machines:
+//
+//   1. BIND TO LOOPBACK ONLY. `new WebSocketServer({ port })` binds to ALL
+//      interfaces (0.0.0.0 / ::) — any machine on the LAN could connect.
+//   2. VALIDATE THE ORIGIN HEADER. WebSocket is NOT subject to the
+//      same-origin policy: any website open in the user's browser can open
+//      ws://localhost:3004, displace the real Pixel Lab tab (browserSocket is
+//      last-one-wins), spoof tool results, and receive canvas snapshots.
+//      We only accept loopback origins (http(s)://localhost|127.0.0.1|::1:anyPort)
+//      plus one explicitly trusted origin from the PIXEL_LAB_ALLOWED_ORIGIN env var.
+//      Connections without an Origin header are rejected (browsers always
+//      send one for cross-origin WS; our only legitimate client is the browser).
+// ---------------------------------------------------------------------------
+
+function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return false;
+  const trusted = process.env.PIXEL_LAB_ALLOWED_ORIGIN;
+  if (trusted && origin === trusted) return true;
+  try {
+    const url = new URL(origin);
+    const host = url.hostname;
+    const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1';
+    const isHttp = url.protocol === 'http:' || url.protocol === 'https:';
+    return isLoopback && isHttp;
+  } catch {
+    return false;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Tool manifest — inlined from TOOL_DECLARATIONS to avoid importing TS from
@@ -288,11 +321,24 @@ const pendingCalls = new Map<string, { resolve: (val: unknown) => void; reject: 
 // WebSocket server (browser connects here)
 // ---------------------------------------------------------------------------
 
-const WS_PORT = 3004;
-const wss = new WebSocketServer({ port: WS_PORT });
+const WS_PORT = Number(process.env.MCP_WS_PORT ?? 3004);
+// '127.0.0.1' — loopback only. Binding without `host` listens on every
+// interface, exposing the unauthenticated bridge to the local network.
+const wss = new WebSocketServer({ port: WS_PORT, host: '127.0.0.1' });
 
-wss.on('connection', (ws) => {
-  console.error(`[mcp] Browser tab connected from port ${WS_PORT}`);
+wss.on('connection', (ws, req: IncomingMessage) => {
+  const origin = req.headers.origin;
+  if (!isAllowedOrigin(origin)) {
+    console.error(`[mcp] Rejected WebSocket connection from untrusted origin: ${origin ?? '(none)'}`);
+    ws.close(1008, 'Origin not allowed');
+    return;
+  }
+  console.error(`[mcp] Browser tab connected from ${origin}`);
+  // If a previous tab is still connected, close it so a stale socket can't
+  // keep receiving tool calls (last-one-wins without this).
+  if (browserSocket && browserSocket !== ws && browserSocket.readyState === WebSocket.OPEN) {
+    browserSocket.close(4000, 'Superseded by a new Pixel Lab tab');
+  }
   browserSocket = ws;
 
   ws.on('message', (data) => {
@@ -336,7 +382,7 @@ wss.on('connection', (ws) => {
   });
 });
 
-console.error(`[mcp] WebSocket server listening on ws://localhost:${WS_PORT}`);
+console.error(`[mcp] WebSocket server listening on ws://127.0.0.1:${WS_PORT} (loopback only, origin-checked)`);
 console.error(`[mcp] Open Pixel Lab in a browser tab to connect.`);
 
 // ---------------------------------------------------------------------------

@@ -475,6 +475,51 @@ function StepBuilder({ onAdd }: { onAdd: (step: AutomationStep) => void }) {
 // Property input — generates the right input based on the JSON schema type
 // ---------------------------------------------------------------------------
 
+/**
+ * JSON textarea with local raw-text state. While the user is mid-edit (the
+ * JSON is temporarily invalid), the raw text is preserved; it re-syncs from
+ * the store value only when the value changes EXTERNALLY (a different
+ * step/param is loaded). The previous controlled textarea reverted the text
+ * to the last valid serialization on any re-render.
+ */
+function JsonTextarea({
+  serialize,
+  placeholder,
+  onChange,
+}: {
+  serialize: () => string;
+  placeholder: string;
+  onChange: (v: unknown) => void;
+}) {
+  const [raw, setRaw] = useState<string>(serialize);
+  const [lastSynced, setLastSynced] = useState<string>(serialize);
+  // React's "adjust state when a prop changes" pattern (setState during
+  // render — no refs, no effect): when the store value is replaced
+  // externally (a different step/param is loaded), adopt its serialization;
+  // while the user is mid-edit, the raw text is preserved.
+  const current = serialize();
+  if (current !== lastSynced) {
+    setLastSynced(current);
+    setRaw(current);
+  }
+  return (
+    <textarea
+      value={raw}
+      onChange={(e) => {
+        setRaw(e.target.value);
+        try {
+          onChange(JSON.parse(e.target.value));
+        } catch {
+          // Still typing — keep the raw text.
+        }
+      }}
+      placeholder={placeholder}
+      rows={2}
+      className="w-full text-xs font-mono rounded-md border editor-border bg-transparent editor-surface px-2 py-1 editor-text outline-none focus-visible:ring-1 focus-visible:ring-editor-accent/40"
+    />
+  );
+}
+
 function PropertyInput({
   name,
   prop,
@@ -588,21 +633,16 @@ function PropertyInput({
 
   if (prop.type === 'object') {
     // For object params (like applyFilter's `params`), use a JSON textarea.
+    // Local raw-text state: without it, the value re-serialization snapped
+    // the textarea back to the last VALID JSON on any sibling re-render,
+    // silently destroying the user's in-progress typing.
     return (
       <div className="space-y-0.5">
         {label}
-        <textarea
-          value={typeof value === 'object' ? JSON.stringify(value, null, 0) : String(value ?? '{}')}
-          onChange={(e) => {
-            try {
-              onChange(JSON.parse(e.target.value));
-            } catch {
-              // Keep the raw text — user is still typing
-            }
-          }}
+        <JsonTextarea
+          serialize={() => (typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value ?? '{}'))}
           placeholder='{"radius": 4}'
-          rows={2}
-          className="w-full text-xs font-mono rounded-md border editor-border bg-transparent editor-surface px-2 py-1 editor-text outline-none focus-visible:ring-1 focus-visible:ring-editor-accent/40"
+          onChange={onChange}
         />
       </div>
     );
@@ -613,18 +653,10 @@ function PropertyInput({
     return (
       <div className="space-y-0.5">
         {label}
-        <textarea
-          value={Array.isArray(value) ? JSON.stringify(value) : String(value ?? '[]')}
-          onChange={(e) => {
-            try {
-              onChange(JSON.parse(e.target.value));
-            } catch {
-              // Keep the raw text
-            }
-          }}
+        <JsonTextarea
+          serialize={() => (Array.isArray(value) ? JSON.stringify(value) : String(value ?? '[]'))}
           placeholder='[{"x":0.5,"y":0.5}]'
-          rows={2}
-          className="w-full text-xs font-mono rounded-md border editor-border bg-transparent editor-surface px-2 py-1 editor-text outline-none focus-visible:ring-1 focus-visible:ring-editor-accent/40"
+          onChange={onChange}
         />
       </div>
     );

@@ -294,15 +294,22 @@ function boxSelection(
   };
 }
 
-function invertMaskInPlace(mask: HTMLCanvasElement, docWidth: number, docHeight: number) {
+function invertMaskInPlace(mask: HTMLCanvasElement) {
+  // Masks are ALPHA-encoded: every consumer (destination-out/destination-in
+  // compositing, contentAwareFill, the marching-ants trace) reads the alpha
+  // channel. The old implementation inverted RGB and kept alpha — a visible
+  // NO-OP that made "select the sky, invert, edit the subject" edit the sky.
+  // Read/write at the mask's own dimensions (it can be stale vs. the doc).
+  const mw = mask.width;
+  const mh = mask.height;
   const ctx = mask.getContext('2d', { willReadFrequently: true })!;
-  const imageData = ctx.getImageData(0, 0, docWidth, docHeight);
+  const imageData = ctx.getImageData(0, 0, mw, mh);
   const data = imageData.data;
   for (let i = 0; i < data.length; i += 4) {
-    data[i] = 255 - data[i];
-    data[i + 1] = 255 - data[i + 1];
-    data[i + 2] = 255 - data[i + 2];
-    // keep alpha
+    data[i] = 255;
+    data[i + 1] = 255;
+    data[i + 2] = 255;
+    data[i + 3] = 255 - data[i + 3];
   }
   ctx.putImageData(imageData, 0, 0);
 }
@@ -701,7 +708,26 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
 export interface ExecuteOptions {
   /** For undo() — pop the workspace history. */
   undoStack?: AgentWorkspace[];
+  /** Recipe nesting depth (guards runRecipe recursion). */
+  depth?: number;
 }
+
+/** Tools that don't need an active layer (metadata / selection / recipes). */
+const NO_LAYER_TOOLS = new Set([
+  'deselectAll',
+  'invertSelection',
+  'getCanvasSnapshot',
+  'listRecipes',
+  'saveRecipe',
+  'runRecipe',
+  'deleteRecipe',
+  'undo',
+]);
+
+/** Hard cap on steps per recipe (saveRecipe rejects beyond this). */
+const MAX_RECIPE_STEPS = 32;
+/** Hard cap on total tool executions within one runRecipe call. */
+const MAX_RECIPE_EXECUTIONS = 64;
 
 export async function executeTool(
   toolName: string,
@@ -710,7 +736,7 @@ export async function executeTool(
   _opts: ExecuteOptions = {},
 ): Promise<ToolResult> {
   const layer = getActiveLayer(ws);
-  if (!layer && toolName !== 'deselectAll' && toolName !== 'invertSelection') {
+  if (!layer && !NO_LAYER_TOOLS.has(toolName)) {
     return { success: false, message: 'No active layer to operate on.' };
   }
 
@@ -830,9 +856,16 @@ export async function executeTool(
       const section = str(args.section, '').toLowerCase();
       const param = str(args.param, '').toLowerCase();
       const value = num(args.value, 0);
-      const ctx = layer!.canvas.getContext('2d', { willReadFrequently: true })!;
       const w = layer!.canvas.width;
       const h = layer!.canvas.height;
+      // The system prompt promises "the editing tool will automatically
+      // restrict itself to the active selection" — apply the same
+      // copy → adjust → paint-back-through-mask pattern applyFilter uses.
+      // (Previously this tool adjusted the WHOLE layer even with a selection.)
+      const selectionMask = ws.selectionMask;
+      const target = selectionMask ? createBlankCanvas(w, h) : layer!.canvas;
+      if (selectionMask) target.getContext('2d')!.drawImage(layer!.canvas, 0, 0);
+      const ctx = target.getContext('2d', { willReadFrequently: true })!;
       let label = '';
       try {
         switch (section) {
@@ -998,9 +1031,26 @@ export async function executeTool(
           default:
             throw new Error(`Unknown develop section: ${section}`);
         }
+        if (selectionMask) {
+          // Paint the adjusted pixels back through the selection mask:
+          // (a) erase the selected region from the layer, (b) paste the
+          // masked adjusted result. Unselected pixels keep the original.
+          const lctx = layer!.canvas.getContext('2d')!;
+          const masked = createBlankCanvas(w, h);
+          const mctx = masked.getContext('2d')!;
+          mctx.drawImage(target, 0, 0);
+          mctx.globalCompositeOperation = 'destination-in';
+          mctx.drawImage(selectionMask, 0, 0);
+          lctx.save();
+          lctx.globalCompositeOperation = 'destination-out';
+          lctx.drawImage(selectionMask, 0, 0);
+          lctx.globalCompositeOperation = 'source-over';
+          lctx.drawImage(masked, 0, 0);
+          lctx.restore();
+        }
         return {
           success: true,
-          message: `Develop: ${label}`,
+          message: `Develop: ${label}${selectionMask ? ' (to selection)' : ''}`,
           thumbnailBase64: generateThumbnail(layer!.canvas, 64),
         };
       } catch (e) {
@@ -1049,13 +1099,20 @@ export async function executeTool(
     // ----- invertSelection -----
     case 'invertSelection': {
       if (!ws.selectionMask) {
-        // Match editor-store behavior: invert-empty = empty mask.
+        // Match editor-store behavior (Photoshop semantics): inverting an
+        // empty selection selects everything.
         const mask = createBlankCanvas(ws.docWidth, ws.docHeight);
+        const mctx = mask.getContext('2d')!;
+        mctx.fillStyle = '#ffffff';
+        mctx.fillRect(0, 0, ws.docWidth, ws.docHeight);
         ws.selectionMask = mask;
-        ws.selectionBounds = { x: 0, y: 0, w: 0, h: 0 };
-        return { success: true, message: 'Inverted (was empty → still empty)' };
+        ws.selectionBounds = { x: 0, y: 0, w: ws.docWidth, h: ws.docHeight };
+        return { success: true, message: 'No prior selection — selected everything' };
       }
-      invertMaskInPlace(ws.selectionMask, ws.docWidth, ws.docHeight);
+      invertMaskInPlace(ws.selectionMask);
+      // The inverted selection can cover the whole document — widen the
+      // bounds so the consumer trace windows stay valid.
+      ws.selectionBounds = { x: 0, y: 0, w: ws.docWidth, h: ws.docHeight };
       return { success: true, message: 'Selection inverted' };
     }
 
@@ -1575,6 +1632,16 @@ export async function executeTool(
       const H = ws.docHeight;
       const imageData = ctx.getImageData(0, 0, W, H);
       const data = imageData.data;
+      // Snapshot the original pixels + read the selection mask (if any) so
+      // the flood fill can be CLIPPED to the selection — brush/shapes/filters
+      // all respect the mask; the bucket previously painted straight through it.
+      const orig = new Uint8ClampedArray(data);
+      const selectionMask = ws.selectionMask;
+      let selAlpha: Uint8ClampedArray | null = null;
+      if (selectionMask && selectionMask.width === W && selectionMask.height === H) {
+        selAlpha = selectionMask.getContext('2d', { willReadFrequently: true })!
+          .getImageData(0, 0, W, H).data;
+      }
       const startIdx = (py * W + px) * 4;
       const targetR = data[startIdx];
       const targetG = data[startIdx + 1];
@@ -1629,6 +1696,18 @@ export async function executeTool(
           }
         }
       }
+      // Revert any filled pixel that falls OUTSIDE the selection mask.
+      if (selAlpha) {
+        for (let idx = 0; idx < W * H; idx++) {
+          if (filled[idx] && selAlpha[idx * 4 + 3] < 128) {
+            const i = idx * 4;
+            data[i] = orig[i];
+            data[i + 1] = orig[i + 1];
+            data[i + 2] = orig[i + 2];
+            data[i + 3] = orig[i + 3];
+          }
+        }
+      }
       ctx.putImageData(imageData, 0, 0);
 
       if (count === 0) {
@@ -1639,7 +1718,7 @@ export async function executeTool(
       }
       return {
         success: true,
-        message: `Bucket fill ${color} at (${xn.toFixed(2)}, ${yn.toFixed(2)}): ${count} pixels (tol ${tolerance})`,
+        message: `Bucket fill ${color} at (${xn.toFixed(2)}, ${yn.toFixed(2)}): ${count} pixels (tol ${tolerance})${selAlpha ? ' (clipped to selection)' : ''}`,
         thumbnailBase64: generateThumbnail(layer!.canvas, 64),
       };
     }
@@ -1647,15 +1726,37 @@ export async function executeTool(
     // ----- saveRecipe -----
     case 'saveRecipe': {
       const name = str(args.name, 'Unnamed Recipe');
-      const steps = Array.isArray(args.steps) ? args.steps.map((s: unknown) => ({
-        toolName: str((s as Record<string, unknown>).toolName, ''),
-        args: ((s as Record<string, unknown>).args ?? {}) as Record<string, unknown>,
-      })) : [];
+      const stepsIn = Array.isArray(args.steps) ? args.steps : [];
+      // Whitelist tool names and FORBID runRecipe/saveRecipe steps: a recipe
+      // step calling runRecipe with its own id recursed until "Maximum call
+      // stack size exceeded", and because recipes persist to localStorage
+      // the crash reproduced from the chat, the Automations panel, AND the
+      // MCP bridge on every future run.
+      const knownTools = new Set(TOOL_DECLARATIONS.map((d) => d.name));
+      const steps = stepsIn
+        .map((s: unknown) => ({
+          toolName: str((s as Record<string, unknown>).toolName, ''),
+          args: ((s as Record<string, unknown>).args ?? {}) as Record<string, unknown>,
+        }))
+        .filter((s) =>
+          knownTools.has(s.toolName)
+          && s.toolName !== 'runRecipe'
+          && s.toolName !== 'saveRecipe'
+          && s.args !== null && typeof s.args === 'object'
+        );
       if (steps.length === 0) {
-        return { success: false, message: 'saveRecipe requires at least one step.' };
+        return {
+          success: false,
+          message: 'saveRecipe requires at least one valid step (known tool, not runRecipe/saveRecipe).',
+        };
       }
-      const id = useAutomationsStore.getState().addAutomation(name, steps);
-      return { success: true, message: `Recipe "${name}" saved (id: ${id}, ${steps.length} steps).` };
+      const dropped = stepsIn.length - steps.length;
+      const capped = steps.slice(0, MAX_RECIPE_STEPS);
+      const id = useAutomationsStore.getState().addAutomation(name, capped);
+      return {
+        success: true,
+        message: `Recipe "${name}" saved (id: ${id}, ${capped.length} steps${dropped > 0 ? `, ${dropped} invalid step(s) dropped` : ''}${steps.length > MAX_RECIPE_STEPS ? `, capped at ${MAX_RECIPE_STEPS}` : ''}).`,
+      };
     }
 
     // ----- listRecipes -----
@@ -1675,9 +1776,23 @@ export async function executeTool(
       if (!recipe) {
         return { success: false, message: `No recipe with id "${recipeId}".` };
       }
+      // Depth + total-step guards (legacy recipes saved before validation
+      // may still contain runRecipe steps or be unbounded).
+      const depth = _opts.depth ?? 0;
+      if (depth >= 2) {
+        return { success: false, message: 'Recipe nesting too deep (max 2 levels of runRecipe).' };
+      }
+      let executed = 0;
       for (let i = 0; i < recipe.steps.length; i++) {
         const step = recipe.steps[i];
-        const r = await executeTool(step.toolName, step.args, ws, _opts);
+        if (executed >= MAX_RECIPE_EXECUTIONS) {
+          return {
+            success: false,
+            message: `Recipe "${recipe.name}" aborted after ${executed} executed steps (cap ${MAX_RECIPE_EXECUTIONS}).`,
+          };
+        }
+        const r = await executeTool(step.toolName, step.args, ws, { ..._opts, depth: depth + 1 });
+        executed++;
         if (!r.success) {
           return {
             success: false,
@@ -1705,8 +1820,11 @@ export async function executeTool(
     // ----- getCanvasSnapshot -----
     case 'getCanvasSnapshot': {
       const canvas = compositeWorkspace(ws);
-      const maxDim = clamp(num(args.maxDimension, 1024), 64, 4096);
-      const quality = clamp(num(args.quality, 0.85), 0.1, 1);
+      // Cap at 512px: the snapshot is stored in the unbounded chat message
+      // list and rendered as an <img> — a 4096px/quality-1 data URL was a
+      // multi-MB blob per call.
+      const maxDim = clamp(num(args.maxDimension, 512), 64, 512);
+      const quality = clamp(num(args.quality, 0.85), 0.1, 0.9);
       const scaled = scaleCanvasToMax(canvas, maxDim);
       return {
         success: true,

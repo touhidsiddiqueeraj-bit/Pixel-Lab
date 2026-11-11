@@ -9,7 +9,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 🔒 Security
+
+#### MCP WebSocket bridge was reachable by any website and the whole LAN (`mcp/server.ts`)
+- The WebSocket server (`new WebSocketServer({ port: 3004 })`) bound to **all interfaces** and performed **no Origin validation**. WebSocket connections are not subject to the same-origin policy: any page open in the user's browser could connect to `ws://localhost:3004`, silently displace the real Pixel Lab tab (`browserSocket` was last-one-wins), invoke any editing tool against the open document, spoof tool results, and receive canvas snapshots. Any machine on the local network could connect directly.
+- The server now binds to **127.0.0.1 only**, and every connection's `Origin` header is validated: only `http(s)://localhost` / `127.0.0.1` / `[::1]` origins (plus one explicit opt-in via the `PIXEL_LAB_ALLOWED_ORIGIN` env var) are accepted; header-less and foreign-origin connections are closed with `1008`. A stale tab is closed (`4000`) when a new tab connects, instead of lingering as a hidden tool-call receiver.
+- Verified with an automated 4-case test (evil origin rejected / no-origin rejected / loopback accepted / supersession closes the stale tab with 4000).
+
+#### Image "dimension bomb" → tab freeze / OOM (`image-processing.ts`, `editor-store.ts`, `MenuBar.tsx`)
+- `createBlankCanvas` accepted any dimensions: a crafted ~2KB PNG declaring 65535×65535 (or `parseInt(prompt(...))` = 999999) attempted a multi-GB canvas allocation → frozen/killed tab, with no error shown. Negative values silently wrapped via WebIDL (`-5` → 4294967291) and made every subsequent `getImageData` throw.
+- Canvas dimensions are now validated (`MAX_CANVAS_EDGE = 16384`, `MAX_CANVAS_AREA = 256 MP`) with a fast-fail `RangeError`; `newDocument` and the new `openImage` action clamp oversized documents/images (preserving aspect ratio, with a toast); batch processing and Image Size… clamp inputs the same way.
+
+#### API key input invited the browser password manager (`AgentPanel.tsx`)
+- The Gemini key field was `autoComplete="current-password"` on a real form — Chrome/Firefox offered "Save password?", persisting (and account-syncing) the key, directly contradicting the on-screen "JS memory only" promise. Now `autoComplete="off"`.
+
+#### Ctrl+S export ignored layer masks — silent content leak (`PhotoEditor.tsx`)
+- The keyboard export paths composited layers without their masks, so the exported PNG contained the pixels the user had masked out — while the menu and title-bar exports honored masks (three export buttons, three different results). All paths now share one mask-aware compositor; failures (huge-document `toDataURL` OOM) surface as an error toast instead of silence.
+
+#### Unvalidated `localStorage` parsing + oversized in-memory payloads
+- Brush presets and saved recipes were `JSON.parse`-ed and cast with no shape validation — a corrupted/tampered value fed NaN geometry into the brush and malformed steps into the executor. Both loaders now validate shape (and cap recipe count).
+- `getCanvasSnapshot` allowed `maxDimension` up to 4096 / quality 1.0 — a multi-MB data URL per call stored permanently in the unbounded chat message list. Capped at 512px / 0.9; chat history is capped at 200 messages.
+- Download filenames built from user-typed doc names are sanitized (`\ / : * ? " < > |` and control chars).
+
 ### 🐛 Fixed
+
+#### Marching-ants rendering (`EditorCanvas.tsx`)
+- The marching-squares `CASE` table had rows 2↔4 and 3↔5 **transposed** (with the `tl<<3|tr<<2|bl<<1|br` packing): every boundary cell whose inside lay right or below emitted a segment perpendicular to the true boundary — the ants on the left/top arcs of an ellipse or lasso appeared as disconnected dash stacks. Corrected to the complement-symmetric table.
+- The contour trace window covered exactly the selection bounds, so the inside/outside transition ring just **outside** the bounds was never visited — contours had gaps wherever a region touched its bounding box, and a solid rectangular wand region traced *nothing* (silently falling back to `strokeRect`). The window is now expanded 1px on each side, clamped to the mask canvas.
+
+#### Undo/redo race conditions (`editor-store.ts`)
+- `undo`/`redo` fired the async restore as fire-and-forget while committing `historyIndex` synchronously: rapid Ctrl+Z ran concurrent restores where the last `Image` to decode won (displayed state ≠ index), and a paint committed mid-restore snapshotted pre-restore pixels into a terminal entry that was then overwritten — silent data loss. Restores now run through a serialized queue; a new `isRestoring` flag makes `pushHistory` skip during the window.
+- `loadIntoCanvas` never rejected: one corrupt snapshot data URL left the restore promise pending forever (undo silently did nothing, index permanently desynced). It now rejects with an error toast.
+
+#### Selection semantics (`editor-store.ts`, `agent/tools.ts`)
+- The agent-side `invertSelection` inverted RGB and kept alpha — a functional no-op (masks are alpha-encoded): "select the sky, invert, edit the subject" edited the **sky**. It now inverts alpha, and inverting an empty selection selects everything (Photoshop semantics) in both the editor store and the agent tools — the old empty-invert created a truthy-but-empty mask that blocked **all** painting until Esc.
+- Selection ops (`invert`/`expand`/`contract`, history restore across a crop, document resize) read/wrote the mask at document dimensions — a stale-dimensioned mask (after crop/resize) made `getImageData` throw `IndexSizeError`. All now operate at the mask's own dimensions; stale masks are cleared when document geometry changes; resize also rescales layer masks.
+- `expandSelection`/`contractSelection` had no radius cap: radius 200 on a 12 MP document was ~2.4 trillion inner iterations (minutes of frozen tab). Radius capped at 64.
+- `mergeDown`/`mergeVisible`/`flattenImage` drew layers without their masks — merging resurrected pixels the user believed deleted. All now composite mask-aware.
+
+#### AI agent correctness (`agent-runner.ts`, `agent/tools.ts`)
+- Self-eval retries **compounded on the mutated original**: attempt 0 received the pristine workspace object itself and `executeTool` mutates canvases in place, so attempt 1 cloned an already-ruined canvas and stacked a second edit on top. Every attempt now clones from the pristine original.
+- The "no visible change" check diffed 64×64 JPEG thumbnails: a small text label or thin line on a large canvas vanished in the downscale and the run silently exited with no preview, no commit, and no error — the user's request was dropped. Now a raw full-resolution pixel diff.
+- Self-eval sent **full-resolution** before/after JPEGs (~10–20 MB on a 4K document) that Gemini rejected; the permissive fallback silently rubber-stamped the edit. Both images are downscaled to 1024px before the eval.
+- `AbortController` was created but never aborted — after clicking Stop, in-flight Gemini/self-eval fetches ran to completion (spent tokens). A new abort registry lets `cancelRun`/`clearApiKey`/`clearChat` abort the in-flight request.
+- Retry feedback quoted the best-so-far score, not the previous attempt's — misleading when a retry scored worse. Now quotes the immediately preceding attempt.
+- `runRecipe` could recurse into itself (`RangeError: Maximum call stack`), and because recipes persist to `localStorage` the crash reproduced from the chat, the Automations panel, and the MCP bridge on every future run. `saveRecipe` now whitelists known tools, forbids `runRecipe`/`saveRecipe` steps, and caps at 32 steps; `runRecipe` enforces a nesting-depth and total-execution cap.
+- `adjustDevelop` and `fillBucket` ignored the active selection, contradicting the system prompt's promise ("the editing tool will automatically restrict itself to the active selection") and its own worked example — a model that followed the documented example brightened the entire image instead of the sky. Both are now selection-masked.
+
+#### Input handling (`EditorCanvas.tsx`)
+- Wheel/pinch: React attaches root wheel listeners **passively**, so the missing `preventDefault` let the browser page-zoom on top of app zoom for every pinch (ctrl+wheel). Now a native non-passive listener with `preventDefault`, and zoom is anchored at the cursor (previously the canvas drifted toward the top-left).
+- Brush stabilizer seed survived stroke end: with stabilizer > 0, every stroke after the first began with a stray line back to where the previous stroke ended. Reset on pointerdown.
+- Tool-switch mid-drag: pressing `E` while still dragging a brush stroke flipped the commit to `destination-out` — the stroke **erased** the layer. The gesture's starting tool is captured at pointerdown and used for the commit; single-letter tool shortcuts are ignored while a stroke is in flight.
+- `pointercancel` committed with stale/(0,0) coordinates, creating a marquee selection from the document origin. Cancel now aborts the gesture (refs reset, no commit).
+- Right-click fell through to the tool branches and painted/dragged while the context menu opened. Non-primary buttons are ignored; `contextmenu` prevented on the canvas.
+- Keyboard shortcuts fired while Radix Select listboxes, sliders, dialogs, and menus had focus — letters switched tools behind an open dialog, number keys retargeted layer opacity while a slider was focused. Guarded via `closest('[role=…]')`.
+- `Shift+[` / `Shift+]` hardness shortcuts were unreachable (with Shift held, `e.key` is `{`/`}`): now matched on `e.code`.
+- `Ctrl+0` aliased `Ctrl+1` (zoom 1:1) although the shortcuts dialog documents it as Fit on Screen. Implemented.
+- Space (hold-to-pan) stuck `true` if the window lost focus while held — the next canvas click panned instead of drawing. Reset on `blur`/`visibilitychange`.
+- Polygonal-lasso path preview never rendered (a `forceRender` tick can't re-run the overlay draw); it now calls `drawOverlay()` directly.
+- Stale-closure: `selectionMask`/`selectionBounds` were missing from `onPointerDown`'s dependency array (the move-tool branch read them), capturing stale values when the user selected and immediately moved.
+- Crop: fractional drag offsets made `drawImage` resample (subtly blurring the whole document); offsets are now rounded, and layer **masks** are cropped identically (they previously kept their old full-size geometry and pointed at the wrong region).
+- Brush opacity was applied twice in the live preview (0.5 × 0.5) but once at commit — the stroke visibly darkened on pointer-up.
+
+#### Cut/duplicate shortcuts were copies (`EditorCanvas.tsx`)
+- `Ctrl+X` (advertised "Cut selection to clipboard") and `Ctrl+Shift+J` (cut to new layer) copied without deleting — Ctrl+V after Ctrl+X duplicated the region. Both now erase the selected pixels (`destination-out` through the selection mask) and push a proper history entry.
+
+#### File open/place/drop robustness (`editor-store.ts`, `MenuBar.tsx`, `PhotoEditor.tsx`)
+- A new `openImage` store action replaces the four copies of `newDocument() + setTimeout(() => addLayer(…) + drawImage)`: the 50–100ms timer raced any concurrent open/new and could attach the image to the **wrong document**; corrupt files never fired an error (no `onerror`) and leaked their object URL; non-image files were accepted on the Ctrl+O and menu paths. All four entry points (menu open, Ctrl+O, drag & drop, open recent) now validate type, surface decode errors, revoke URLs, and commit synchronously.
+- Open Recent is now populated by every open path (previously only drag & drop ever added entries) and stores a 512px thumbnail instead of a full-resolution JPEG data URL per file.
+- Batch Process Files hung forever on the first undecodable file (promise only resolved on `img.onload`); it now rejects per file, continues the batch, clamps image dimensions, sanitizes the output filename, and reports `processed/total`.
+
+#### Filter math (`image-processing.ts`)
+- `applyPosterize` with `levels < 2` → `step = ±Infinity` → `NaN` → solid black image; guarded.
+- `applyVignette` with `size = 100` → `innerRadius == outerRadius` → `0/0 = NaN` → black/white image; denominator guarded. Same for `applyLensVignette` with `midpoint = 100` (±Infinity white blowout).
+- `applyEdgeDetect` / `applyEmboss` left a 1px fully-transparent border (their loops never visit the outer ring); output now initializes from the source copy.
+- `hexToRgb` returned NaN channels for short (`#f00`) or malformed strings (NaN → 0 → near-black fills); it now returns `null` and all call sites fall back.
+- `generateThumbnail` divided by zero for degenerate canvases (ratio `Infinity` wrapped the temp canvas to 0×0); guarded.
+- `contentAwareFill` only filled within 20px of the selection boundary — anything wider kept its original pixels while reporting success. Now an iterative boundary-inward fill (up to 12 passes).
+- `newDocument(bg='transparent')` produced a **black** background (invalid CSS color silently ignored → default fillStyle); transparent backgrounds now skip the fill.
+
+#### UI state (`PhotoEditor.tsx`, `MenuBar.tsx`, `NavigatorPanel.tsx`, `AutomationsPanel.tsx`, `VectorizeDialog.tsx`, `figma-import.ts`)
+- Auto-fit zoom re-fit on **every** container resize (panel toggle, mobile keyboard) destroying the user's zoom/pan mid-edit; now only on first measurement or document-dimension change.
+- Mobile Undo/Redo buttons read `getState()` in `disabled` — stale right after an edit (strokes mutate canvases without replacing `layers`). Now reactively subscribed to `historyIndex`/`history.length`.
+- Window resize re-applied the default panel state on every event (destroying the user's explicit toggle); applied only when the mobile/desktop breakpoint is crossed.
+- "Snap to Pixel Grid" toast reported the pre-toggle state (render-time snapshot); reads post-toggle state.
+- Gaussian Blur… / Image Size… prompts accepted unbounded values (radius 1e9, 999999×999999); clamped (radius ≤ 50, canvas limits).
+- The Recipes JSON textareas reverted the user's in-progress typing to the last valid serialization on any sibling re-render; they now hold local raw text (React's adjust-state-during-render pattern).
+- Figma import decoded each frame image twice (once for the data URL, once for dimensions); loads once.
+- SVG export revoked its object URL synchronously after `click()` (can cancel the download in Firefox); revoke deferred.
+- `reorderLayers` spliced `undefined` into the layers array on out-of-range indices (stale drag racing a deletion); indices validated.
 
 #### Selection Performance Cliff (`EditorCanvas.tsx`)
 - **Root cause**: with a selection active, every pointermove re-rendered the whole component and re-ran the full overlay redraw; drags called `setSelection` per move (full-document canvas allocation + store update + contour re-trace per event); the overlay canvas backing store was reallocated on every redraw; and each marching-ants redraw issued one `stroke()` call per contour segment × 2 passes at 15fps.

@@ -49,7 +49,15 @@ import {
   scaleCanvas,
   createBlankCanvas,
   generateThumbnail,
+  clampImageSize,
 } from '@/lib/image-processing';
+
+/** Strip characters browsers reject in the download attribute (and path
+ * separators from user-typed document names). */
+function sanitizeFileName(name: string): string {
+  const cleaned = name.replace(/[\\/:*?"<>|\r\n\t]/g, '_').trim();
+  return cleaned || 'untitled';
+}
 
 export function MenuBar({ onOpenNewDoc, onOpenFigmaImport }: { onOpenNewDoc: () => void; onOpenFigmaImport?: () => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -93,59 +101,66 @@ export function MenuBar({ onOpenNewDoc, onOpenFigmaImport }: { onOpenNewDoc: () 
   const handleFileSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.error(`"${file.name}" is not an image file`);
+      e.target.value = '';
+      return;
+    }
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
-      newDocument(img.naturalWidth, img.naturalHeight, '#ffffff');
-      setTimeout(() => {
-        const layerId = addLayer(file.name.replace(/\.[^/.]+$/, ''));
-        const state = useEditorStore.getState();
-        const layer = state.layers.find((l) => l.id === layerId);
-        if (layer) {
-          const ctx = layer.canvas.getContext('2d')!;
-          ctx.drawImage(img, 0, 0);
-          refreshThumbnail(layerId);
-          pushHistory('Open Image');
-        }
-        URL.revokeObjectURL(url);
-      }, 50);
+      // openImage: dimension validation/clamping + synchronous commit (the
+      // old 50ms setTimeout raced any concurrent open/new and could attach
+      // this image to the WRONG document).
+      useEditorStore.getState().openImage(img, file.name.replace(/\.[^/.]+$/, ''), 'Open Image');
+      URL.revokeObjectURL(url);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      toast.error(`Could not read "${file.name}" — the file may be corrupt`);
     };
     img.src = url;
     e.target.value = '';
-  }, [newDocument, addLayer, refreshThumbnail, pushHistory]);
+  }, []);
 
   const handleExport = useCallback((format: 'png' | 'jpeg' | 'webp') => {
-    const flat = createBlankCanvas(docWidth, docHeight);
-    const ctx = flat.getContext('2d')!;
-    if (format === 'jpeg') {
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, docWidth, docHeight);
-    }
-    for (const layer of layers) {
-      if (!layer.visible) continue;
-      ctx.save();
-      ctx.globalAlpha = layer.opacity;
-      ctx.globalCompositeOperation = layer.blendMode;
-      // Apply mask if present
-      if (layer.maskCanvas && layer.maskEnabled) {
-        const tmp = createBlankCanvas(docWidth, docHeight);
-        const tmpCtx = tmp.getContext('2d')!;
-        tmpCtx.drawImage(layer.canvas, 0, 0);
-        tmpCtx.globalCompositeOperation = 'destination-in';
-        tmpCtx.drawImage(layer.maskCanvas, 0, 0);
-        ctx.drawImage(tmp, 0, 0);
-      } else {
-        ctx.drawImage(layer.canvas, 0, 0);
+    try {
+      const flat = createBlankCanvas(docWidth, docHeight);
+      const ctx = flat.getContext('2d')!;
+      if (format === 'jpeg') {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, docWidth, docHeight);
       }
-      ctx.restore();
+      for (const layer of layers) {
+        if (!layer.visible) continue;
+        ctx.save();
+        ctx.globalAlpha = layer.opacity;
+        ctx.globalCompositeOperation = layer.blendMode;
+        // Apply mask if present
+        if (layer.maskCanvas && layer.maskEnabled) {
+          const tmp = createBlankCanvas(docWidth, docHeight);
+          const tmpCtx = tmp.getContext('2d')!;
+          tmpCtx.drawImage(layer.canvas, 0, 0);
+          tmpCtx.globalCompositeOperation = 'destination-in';
+          tmpCtx.drawImage(layer.maskCanvas, 0, 0);
+          ctx.drawImage(tmp, 0, 0);
+        } else {
+          ctx.drawImage(layer.canvas, 0, 0);
+        }
+        ctx.restore();
+      }
+      const mime = format === 'png' ? 'image/png' : format === 'jpeg' ? 'image/jpeg' : 'image/webp';
+      const dataUrl = flat.toDataURL(mime, 0.95);
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = `${sanitizeFileName(docName.replace(/\.[^/.]+$/, ''))}.${format}`;
+      link.click();
+      toast.success(`Exported as ${format.toUpperCase()}`);
+    } catch {
+      // toDataURL on a huge document can throw (OOM) — surface it instead of
+      // failing silently after the user waited for the encode.
+      toast.error('Export failed — the document may be too large for this browser');
     }
-    const mime = format === 'png' ? 'image/png' : format === 'jpeg' ? 'image/jpeg' : 'image/webp';
-    const dataUrl = flat.toDataURL(mime, 0.95);
-    const link = document.createElement('a');
-    link.href = dataUrl;
-    link.download = `${docName.replace(/\.[^/.]+$/, '')}.${format}`;
-    link.click();
-    toast.success(`Exported as ${format.toUpperCase()}`);
   }, [layers, docWidth, docHeight, docName]);
 
   const handlePlaceClick = useCallback(() => {
@@ -155,6 +170,11 @@ export function MenuBar({ onOpenNewDoc, onOpenFigmaImport }: { onOpenNewDoc: () 
   const handlePlaceImage = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.error(`"${file.name}" is not an image file`);
+      e.target.value = '';
+      return;
+    }
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
@@ -168,6 +188,10 @@ export function MenuBar({ onOpenNewDoc, onOpenFigmaImport }: { onOpenNewDoc: () 
         pushHistory('Place Image');
       }
       URL.revokeObjectURL(url);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      toast.error(`Could not read "${file.name}" — the file may be corrupt`);
     };
     img.src = url;
     e.target.value = '';
@@ -258,18 +282,33 @@ export function MenuBar({ onOpenNewDoc, onOpenFigmaImport }: { onOpenNewDoc: () 
     if (w === null) return;
     const h = prompt('New height (px):', String(docHeight));
     if (h === null) return;
-    const newW = parseInt(w, 10);
-    const newH = parseInt(h, 10);
+    let newW = parseInt(w, 10);
+    let newH = parseInt(h, 10);
     if (isNaN(newW) || isNaN(newH) || newW < 1 || newH < 1) {
       toast.error('Invalid dimensions');
       return;
     }
+    // Clamp to canvas safety limits — parseInt(prompt(...)) accepted
+    // 999999×999999 and froze the tab scaling every layer.
+    ({ w: newW, h: newH } = clampImageSize(newW, newH));
     const state = useEditorStore.getState();
     const newLayers = state.layers.map((l) => {
       const newCanvas = scaleCanvas(l.canvas, newW, newH);
-      return { ...l, canvas: newCanvas, thumbnail: generateThumbnail(newCanvas) };
+      let maskCanvas = l.maskCanvas;
+      if (maskCanvas) {
+        // Resize the mask with the document — a stale-dimensioned mask made
+        // every subsequent selection op throw IndexSizeError.
+        maskCanvas = scaleCanvas(maskCanvas, newW, newH);
+      }
+      return { ...l, canvas: newCanvas, maskCanvas, thumbnail: generateThumbnail(newCanvas) };
     });
-    useEditorStore.setState({ layers: newLayers, docWidth: newW, docHeight: newH });
+    useEditorStore.setState({
+      layers: newLayers,
+      docWidth: newW,
+      docHeight: newH,
+      selectionMask: null,
+      selectionBounds: null,
+    });
     pushHistory(`Resize to ${newW}x${newH}`);
     toast.success(`Resized to ${newW}×${newH}`);
   }, [docWidth, docHeight, pushHistory]);
@@ -388,17 +427,13 @@ export function MenuBar({ onOpenNewDoc, onOpenFigmaImport }: { onOpenNewDoc: () 
                     <MenubarItem key={i} className={itemClass} onClick={() => {
                       const img = new Image();
                       img.onload = () => {
-                        newDocument(img.naturalWidth, img.naturalHeight, '#ffffff');
-                        setTimeout(() => {
-                          const layerId = addLayer(f.name);
-                          const state = useEditorStore.getState();
-                          const layer = state.layers.find((l) => l.id === layerId);
-                          if (layer) {
-                            layer.canvas.getContext('2d')!.drawImage(img, 0, 0);
-                            refreshThumbnail(layerId);
-                            pushHistory('Open Recent');
-                          }
-                        }, 50);
+                        // openImage also adds the entry back to recent files
+                        // (File→Open used to never populate the list — only
+                        // drag & drop did).
+                        useEditorStore.getState().openImage(img, f.name, 'Open Recent');
+                      };
+                      img.onerror = () => {
+                        toast.error(`Could not open "${f.name}" — cached data is no longer readable`);
                       };
                       img.src = f.dataUrl;
                     }}>
@@ -423,28 +458,56 @@ export function MenuBar({ onOpenNewDoc, onOpenFigmaImport }: { onOpenNewDoc: () 
                 const files = Array.from((e.target as HTMLInputElement).files || []);
                 if (files.length === 0) return;
                 const tid = toast.loading(`Processing ${files.length} files...`);
-                for (let i = 0; i < files.length; i++) {
-                  const file = files[i];
-                  const url = URL.createObjectURL(file);
-                  const img = new Image();
-                  await new Promise<void>((resolve) => {
-                    img.onload = () => {
-                      // Apply current filter stack (just brightness/contrast as example)
-                      const canvas = createBlankCanvas(img.naturalWidth, img.naturalHeight);
-                      const ctx = canvas.getContext('2d')!;
-                      ctx.drawImage(img, 0, 0);
-                      // Export
-                      const link = document.createElement('a');
-                      link.href = canvas.toDataURL('image/png');
-                      link.download = `edited-${file.name}`;
-                      link.click();
-                      URL.revokeObjectURL(url);
-                      resolve();
-                    };
-                    img.src = url;
-                  });
+                let processed = 0;
+                let failed = 0;
+                try {
+                  for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    try {
+                      const url = URL.createObjectURL(file);
+                      await new Promise<void>((resolve, reject) => {
+                        const img = new Image();
+                        img.onload = () => {
+                          try {
+                            // Clamp dimensions — a crafted "dimension bomb"
+                            // image froze the tab on a multi-GB canvas.
+                            const { w, h } = clampImageSize(img.naturalWidth, img.naturalHeight);
+                            const canvas = createBlankCanvas(w, h);
+                            const ctx = canvas.getContext('2d')!;
+                            ctx.drawImage(img, 0, 0, w, h);
+                            const link = document.createElement('a');
+                            link.href = canvas.toDataURL('image/png');
+                            link.download = `edited-${sanitizeFileName(file.name.replace(/\.[^/.]+$/, ''))}.png`;
+                            link.click();
+                            processed++;
+                            resolve();
+                          } catch (err) {
+                            reject(err);
+                          } finally {
+                            URL.revokeObjectURL(url);
+                          }
+                        };
+                        // Without a rejection path, one undecodable file left
+                        // the whole batch hanging on a promise that never
+                        // settled (and the object URL leaked).
+                        img.onerror = () => {
+                          URL.revokeObjectURL(url);
+                          reject(new Error('decode failed'));
+                        };
+                        img.src = url;
+                      });
+                    } catch {
+                      failed++;
+                      // Continue with the remaining files.
+                    }
+                  }
+                } finally {
+                  if (failed > 0) {
+                    toast.error(`Processed ${processed}/${files.length} files — ${failed} could not be read`, { id: tid });
+                  } else {
+                    toast.success(`Processed ${files.length} files`, { id: tid });
+                  }
                 }
-                toast.success(`Processed ${files.length} files`, { id: tid });
               };
               input.click();
             }}>
@@ -892,7 +955,11 @@ export function MenuBar({ onOpenNewDoc, onOpenFigmaImport }: { onOpenNewDoc: () 
             <MenubarItem className={itemClass} onClick={() => {
               const r = prompt('Blur radius (px):', '5');
               if (r === null) return;
-              runFilter('Gaussian Blur', (ctx, w, h) => applyFastBlur(ctx, w, h, parseFloat(r) || 0));
+              // Clamp: applyFastBlur is O(w·h·r) — an unclamped radius froze
+              // the tab for minutes.
+              const radius = Math.max(0.1, Math.min(50, parseFloat(r) || 0));
+              if (parseFloat(r) > 50) toast.info('Blur radius clamped to 50px');
+              runFilter('Gaussian Blur', (ctx, w, h) => applyFastBlur(ctx, w, h, radius));
             }}>
               <span>Gaussian Blur...</span><span></span>
             </MenubarItem>
@@ -1144,9 +1211,11 @@ export function MenuBar({ onOpenNewDoc, onOpenFigmaImport }: { onOpenNewDoc: () 
             </MenubarItem>
             <MenubarSeparator className="editor-border" />
             <MenubarItem className={itemClass} onClick={() => {
-              // Toggle pixel grid (reuse showGrid)
+              // Toggle pixel grid (reuse showGrid). Read the POST-toggle
+              // state — `store` is the render-time snapshot, so it still held
+              // the pre-toggle value and the toast always said the opposite.
               store.toggleGrid();
-              toast.success(store.showGrid ? 'Pixel grid enabled' : 'Pixel grid disabled');
+              toast.success(useEditorStore.getState().showGrid ? 'Pixel grid enabled' : 'Pixel grid disabled');
             }}>
               <span>Snap to Pixel Grid</span><span className="text-xs editor-text-dim">{store.showGrid ? '✓' : ''}</span>
             </MenubarItem>

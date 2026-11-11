@@ -53,6 +53,7 @@ import {
 } from './tools';
 import { createBlankCanvas, generateThumbnail } from '@/lib/image-processing';
 import { cloneLayer, snapshotWorkspace } from '@/lib/workspace-utils';
+import { registerAbortController, unregisterAbortController } from './abort-registry';
 
 // ---------------------------------------------------------------------------
 // System prompt — gives the model context about the editor & tool usage
@@ -169,8 +170,12 @@ export async function runAgent({ prompt }: RunParams): Promise<void> {
   const startCancelToken = agentStore.cancelToken;
   const isCancelled = () => useAgentStore.getState().cancelToken !== startCancelToken;
 
-  // AbortController for the in-flight fetch.
+  // AbortController for the in-flight fetch. Registered in the abort
+  // registry so cancelRun()/clearApiKey()/clearChat() can ACTUALLY abort the
+  // HTTP request (previously it was created but never aborted — the fetch
+  // ran to completion after the UI said "cancelled").
   const abortCtrl = new AbortController();
+  registerAbortController(abortCtrl);
 
   // Add the user's message to the chat thread.
   agentStore.addMessage({ role: 'user', text: prompt });
@@ -191,9 +196,12 @@ export async function runAgent({ prompt }: RunParams): Promise<void> {
 
   // Snapshot the live editor state into an offscreen workspace. We keep this
   // ORIGINAL snapshot separate from the working workspace so we can reset
-  // back to it between self-eval retries.
+  // back to it between self-eval retries. Downscale the before/after images
+  // sent to the API — a full-res 4000×3000 JPEG pair was a ~10–20 MB request
+  // that Gemini rejected (and the permissive fallback silently rubber-stamped).
   const originalWs = snapshotWorkspace();
-  const beforeDataUrl = compositeWorkspace(originalWs).toDataURL('image/jpeg', 0.85);
+  const beforeCanvas = compositeWorkspace(originalWs);
+  const beforeDataUrl = downscaleCanvasToDataUrl(beforeCanvas, 1024);
 
   // Build the system prompt with the user's preference summary appended.
   // The summary is empty on the first run and grows as the user accepts/
@@ -219,6 +227,10 @@ Adapt your edits to match what the user tends to accept. Avoid edits similar to 
     reasoning: string;
     attempt: number;
   } | null = null;
+  // Feedback from the IMMEDIATELY PREVIOUS attempt (not the best) — the
+  // retry prompt used to quote bestAttempt.score, misleading the model when
+  // a later attempt scored worse than an earlier one.
+  let lastFeedback: { score: number; reasoning: string } | null = null;
 
   try {
     for (let attempt = 0; attempt <= MAX_SELF_EVAL_RETRIES; attempt++) {
@@ -228,10 +240,12 @@ Adapt your edits to match what the user tends to accept. Avoid edits similar to 
         return;
       }
 
-      // Reset the working workspace to the original snapshot for each retry
-      // (so retry attempts don't compound on top of a bad edit). On attempt 0
-      // this is just a fresh clone of the same state.
-      const ws = attempt === 0 ? originalWs : snapshotWorkspaceFrom(originalWs);
+      // ALWAYS clone from the pristine original — including attempt 0.
+      // Previously attempt 0 received `originalWs` itself, and executeTool
+      // mutates workspace canvases in place, so attempt 1 cloned an
+      // already-ruined canvas: retries STACKED on top of the bad edit and
+      // the "before" comparison image already contained attempt 0's changes.
+      const ws = snapshotWorkspaceFrom(originalWs);
 
       // Build the initial contents. On retries, we prepend feedback from the
       // previous self-eval so the model knows what went wrong.
@@ -239,7 +253,7 @@ Adapt your edits to match what the user tends to accept. Avoid edits similar to 
         ? prompt
         : `${prompt}
 
-(Previous attempt scored ${bestAttempt?.score ?? '?'}/10 on self-eval. Feedback: "${bestAttempt?.reasoning ?? 'no feedback'}". Please try again, fixing the issues mentioned. Make sure the edit is visible and affects the right region.)`;
+(Previous attempt scored ${lastFeedback?.score ?? '?'}/10 on self-eval. Feedback: "${lastFeedback?.reasoning ?? 'no feedback'}". Please try again, fixing the issues mentioned. Make sure the edit is visible and affects the right region.)`;
 
       const initialImagePart = canvasToInlineImagePart(compositeWorkspace(ws), 1024, 0.85);
       const contents: GeminiContent[] = [
@@ -279,11 +293,15 @@ Adapt your edits to match what the user tends to accept. Avoid edits similar to 
 
       // Loop exited with a text-only response — composite the workspace.
       const afterCanvas = compositeWorkspace(ws);
-      const afterDataUrl = afterCanvas.toDataURL('image/jpeg', 0.85);
+      const afterDataUrl = downscaleCanvasToDataUrl(afterCanvas, 1024);
 
       // Only proceed to self-eval if the canvas actually changed. If it
       // didn't change, there's nothing to commit — mark done and exit.
-      if (!(await imagesDiffer(beforeDataUrl, afterDataUrl))) {
+      // Raw full-resolution pixel comparison: the old 64×64 JPEG thumbnail
+      // diff was too coarse — a small text label or thin line on a large
+      // canvas vanished in the downscale and the run silently exited with
+      // no preview and no error (the edit was dropped).
+      if (!(await canvasesDiffer(beforeCanvas, afterCanvas))) {
         agentStore.setStatus('done');
         agentStore.setStatusLine('');
         return;
@@ -330,6 +348,7 @@ Adapt your edits to match what the user tends to accept. Avoid edits similar to 
           attempt,
         };
       }
+      lastFeedback = { score: selfScore, reasoning: selfReasoning };
 
       // If the edit passed self-eval, show the preview. Otherwise, retry
       // (unless we've exhausted retries).
@@ -403,6 +422,8 @@ Adapt your edits to match what the user tends to accept. Avoid edits similar to 
     });
     agentStore.setStatus('error');
     agentStore.setStatusLine('');
+  } finally {
+    unregisterAbortController(abortCtrl);
   }
 }
 
@@ -810,58 +831,60 @@ function buildHistoryLabel(prompt: string, toolCallCount: number): string {
 }
 
 /**
- * Fast pixel-diff check between two image data URLs.
+ * Raw full-resolution pixel diff between two same-size canvases.
  *
- * Decodes both URLs, downscales them to a 64×64 thumbnail, and counts how many
- * pixels differ by more than a small threshold. If fewer than 0.1% of pixels
- * differ, we consider the images "the same" — this catches the case where the
- * model called only selection/undo/deselectAll tools that don't actually
- * mutate pixels (or where JPEG compression noise caused a tiny diff).
+ * Counts pixels where any RGBA channel differs by > 8 (invisible sub-8 noise
+ * is ignored). Returns true if more than 0.001% of pixels differ — small
+ * edits (a text label, a thin line) still register, while a genuine no-op
+ * (e.g. the model only called selection/deselect tools) does not.
  *
- * Returns true if the images are meaningfully different, false if they're
- * effectively identical.
+ * Replaces the old 64×64 JPEG-thumbnail diff, which was far too coarse: a
+ * small edit on a large canvas vanished in the downscale and the run
+ * silently exited with no preview, no commit, and no error — dropping the
+ * user's request on the floor.
  */
-async function imagesDiffer(
-  beforeDataUrl: string,
-  afterDataUrl: string,
-  threshold = 0.001, // 0.1% of pixels must differ
-): Promise<boolean> {
-  // Fast path: identical strings → definitely no change.
-  if (beforeDataUrl === afterDataUrl) return false;
-
-  const size = 64;
-  const [a, b] = await Promise.all([
-    decodeToThumbnail(beforeDataUrl, size),
-    decodeToThumbnail(afterDataUrl, size),
-  ]);
-  if (!a || !b) return true; // If decode failed, assume they differ (safer).
+function canvasesDiffer(
+  a: HTMLCanvasElement,
+  b: HTMLCanvasElement,
+  threshold = 0.00001, // 0.001% of pixels must differ
+): boolean {
+  if (a.width !== b.width || a.height !== b.height) return true;
+  if (a.width < 1 || a.height < 1) return false;
+  const actx = a.getContext('2d', { willReadFrequently: true })!;
+  const bctx = b.getContext('2d', { willReadFrequently: true })!;
+  const da = actx.getImageData(0, 0, a.width, a.height).data;
+  const db = bctx.getImageData(0, 0, b.width, b.height).data;
   let diffPixels = 0;
-  const total = size * size;
-  // Per-pixel RGB distance — if any channel differs by > 8, count the pixel.
-  for (let i = 0; i < a.length; i += 4) {
-    const dr = Math.abs(a[i] - b[i]);
-    const dg = Math.abs(a[i + 1] - b[i + 1]);
-    const db = Math.abs(a[i + 2] - b[i + 2]);
-    if (dr > 8 || dg > 8 || db > 8) diffPixels++;
+  for (let i = 0; i < da.length; i += 4) {
+    if (
+      Math.abs(da[i] - db[i]) > 8
+      || Math.abs(da[i + 1] - db[i + 1]) > 8
+      || Math.abs(da[i + 2] - db[i + 2]) > 8
+      || Math.abs(da[i + 3] - db[i + 3]) > 8
+    ) {
+      diffPixels++;
+    }
   }
+  const total = a.width * a.height;
   return diffPixels / total > threshold;
 }
 
-/** Decode a data URL into a downscaled Uint8ClampedArray of RGBA pixels. */
-function decodeToThumbnail(dataUrl: string, size: number): Promise<Uint8ClampedArray | null> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const c = document.createElement('canvas');
-      c.width = size;
-      c.height = size;
-      const ctx = c.getContext('2d')!;
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'low';
-      ctx.drawImage(img, 0, 0, size, size);
-      resolve(ctx.getImageData(0, 0, size, size).data);
-    };
-    img.onerror = () => resolve(null);
-    img.src = dataUrl;
-  });
+/**
+ * Downscale a canvas to at most `maxEdge` on its longest edge and encode as
+ * a JPEG data URL. Keeps self-eval request payloads ~100-200 KB instead of
+ * multi-MB (Gemini rejects oversized inline data, and the permissive
+ * fallback silently skipped the evaluation).
+ */
+function downscaleCanvasToDataUrl(canvas: HTMLCanvasElement, maxEdge: number, quality = 0.85): string {
+  const scale = Math.min(1, maxEdge / Math.max(canvas.width, canvas.height));
+  if (scale >= 1) return canvas.toDataURL('image/jpeg', quality);
+  const tmp = createBlankCanvas(
+    Math.max(1, Math.round(canvas.width * scale)),
+    Math.max(1, Math.round(canvas.height * scale)),
+  );
+  const tctx = tmp.getContext('2d')!;
+  tctx.imageSmoothingEnabled = true;
+  tctx.imageSmoothingQuality = 'high';
+  tctx.drawImage(canvas, 0, 0, tmp.width, tmp.height);
+  return tmp.toDataURL('image/jpeg', quality);
 }

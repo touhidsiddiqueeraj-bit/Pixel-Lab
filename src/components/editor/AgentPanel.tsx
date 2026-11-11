@@ -291,7 +291,11 @@ export function AgentPanel() {
             )}
           </div>
           <form
-            autoComplete="current-password"
+            // 'off' — the API key must never be offered to the browser
+            // password manager: autoComplete="current-password" let Chrome/
+            // Firefox prompt "Save password?" and persist (and sync) the
+            // Gemini key, contradicting the in-memory-only promise below.
+            autoComplete="off"
             onSubmit={(e) => {
               e.preventDefault();
               handleSetKey();
@@ -300,7 +304,8 @@ export function AgentPanel() {
           >
             <Input
               type={keyVisible ? 'text' : 'password'}
-              autoComplete="current-password"
+              autoComplete="off"
+              name="gemini-api-key-off"
               placeholder="AIza…"
               value={draftKey}
               onChange={(e) => setDraftKey(e.target.value)}

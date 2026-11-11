@@ -40,16 +40,19 @@ function marchSquaresContour(
   maskCanvas: HTMLCanvasElement,
   bounds: { x: number; y: number; w: number; h: number },
 ): number[][] {
-  // Integer-align the trace window. Selection bounds arrive as FLOATS
-  // (pointer coordinates), and float values poisoned every typed-array
-  // read below: data[(j * w + i) * 4 + 3] with a fractional w resolves to
-  // `undefined`, so only rows/columns whose index arithmetic happened to
-  // land on integers were traced — a garbled contour (or none at all).
-  const bx = Math.floor(bounds.x);
-  const by = Math.floor(bounds.y);
-  const w = Math.max(1, Math.ceil(bounds.x + bounds.w) - bx);
-  const h = Math.max(1, Math.ceil(bounds.y + bounds.h) - by);
-  if (w < 1 || h < 1) return [];
+  // Integer-align the trace window, EXPANDED by 1px on each side (clamped
+  // to the mask canvas) so the inside/outside transition ring just OUTSIDE
+  // the bounds is actually visited. The old window covered exactly the
+  // bounds, so the boundary cells at the outer edge were never traced —
+  // wand/lasso contours had gaps wherever the region touched its bounding
+  // box (a solid rectangular region traced nothing at all).
+  const cw = maskCanvas.width;
+  const ch = maskCanvas.height;
+  const bx = Math.max(0, Math.floor(bounds.x) - 1);
+  const by = Math.max(0, Math.floor(bounds.y) - 1);
+  const w = Math.min(cw - bx, Math.ceil(bounds.x + bounds.w) + 1 - bx);
+  const h = Math.min(ch - by, Math.ceil(bounds.y + bounds.h) + 1 - by);
+  if (w < 2 || h < 2) return [];
   const ctx = maskCanvas.getContext('2d', { willReadFrequently: true })!;
   const imgData = ctx.getImageData(bx, by, w, h);
   const data = imgData.data;
@@ -59,8 +62,8 @@ function marchSquaresContour(
   // Edge midpoint lookup: 1=T, 2=B, 3=L, 4=R
   // Tables: [s1_e1, s1_e2, s2_e1, s2_e2] (0 = none)
   const CASE: [number, number, number, number][] = [
-    [0,0,0,0],[2,4,0,0],[1,4,0,0],[1,2,0,0],
-    [2,3,0,0],[3,4,0,0],[1,4,3,2],[1,3,0,0],
+    [0,0,0,0],[2,4,0,0],[2,3,0,0],[3,4,0,0],
+    [1,4,0,0],[1,2,0,0],[1,4,3,2],[1,3,0,0],
     [1,3,0,0],[1,4,3,2],[1,2,0,0],[1,4,0,0],
     [3,4,0,0],[2,3,0,0],[2,4,0,0],[0,0,0,0],
   ];
@@ -152,6 +155,10 @@ export function EditorCanvas() {
 
   // Tool state
   const drawingRef = useRef(false);
+  // Tool captured at pointer-down: used at commit time so switching tools
+  // via keyboard MID-DRAG can't flip a brush stroke into an erase (the
+  // gesture must commit with the tool it started with).
+  const drawingToolRef = useRef<string | null>(null);
   const lastPointRef = useRef<Point | null>(null);
   const startPointRef = useRef<Point | null>(null);
   const lassoPointsRef = useRef<Point[]>([]);
@@ -613,8 +620,10 @@ export function EditorCanvas() {
     if (!layer || !strokeCanvasRef.current) return;
     const ctx = layer.canvas.getContext('2d')!;
     const strokeCanvas = strokeCanvasRef.current;
-    // Check if eraser is active — use destination-out to erase
-    const isEraser = useEditorStore.getState().activeTool === 'eraser';
+    // Use the tool captured at pointer-DOWN — a mid-drag keyboard tool
+    // switch (E during a brush stroke) used to flip the commit to
+    // destination-out and ERASE the layer instead of painting it.
+    const isEraser = (drawingToolRef.current ?? useEditorStore.getState().activeTool) === 'eraser';
     const symmetryPoints = applySymmetry({ x: 0, y: 0 });
     for (const offset of symmetryPoints) {
       ctx.save();
@@ -696,12 +705,15 @@ export function EditorCanvas() {
         }
       }
     } else {
-      // For brush/pencil, composite normally then overlay stroke
+      // For brush/pencil, composite normally then overlay stroke. The
+      // stroke canvas already has brushOpacity baked into its segments, so
+      // the preview must NOT multiply it again — a 50% brush previewed at
+      // 25% and visibly darkened on pointer-up.
       composite();
       const layer = getActiveLayer();
       if (layer) {
         ctx.save();
-        ctx.globalAlpha = layer.opacity * (toolOptions.brushOpacity / 100);
+        ctx.globalAlpha = layer.opacity;
         ctx.globalCompositeOperation = layer.blendMode as GlobalCompositeOperation;
         ctx.drawImage(strokeCanvasRef.current, 0, 0);
         ctx.restore();
@@ -1086,7 +1098,8 @@ export function EditorCanvas() {
     const data = imageData.data;
     const startIdx = (startY * docWidth + startX) * 4;
     const targetR = data[startIdx], targetG = data[startIdx + 1], targetB = data[startIdx + 2], targetA = data[startIdx + 3];
-    const rgb = hexToRgb(color);
+    // hexToRgb can return null for malformed colors — fall back to black.
+    const rgb = hexToRgb(color) ?? { r: 0, g: 0, b: 0 };
     const fillR = rgb.r, fillG = rgb.g, fillB = rgb.b;
     const threshold = (tolerance / 100) * (150 * 150 * 3);
     const W = docWidth, H = docHeight;
@@ -1143,8 +1156,8 @@ export function EditorCanvas() {
     const layer = getActiveLayer();
     if (!layer || layer.locked) return;
     const ctx = layer.canvas.getContext('2d')!;
-    const fg = hexToRgb(foreground);
-    const bg = hexToRgb(background);
+    const fg = hexToRgb(foreground) ?? { r: 0, g: 0, b: 0 };
+    const bg = hexToRgb(background) ?? { r: 255, g: 255, b: 255 };
     const gradient = ctx.createLinearGradient(from.x, from.y, to.x, to.y);
     gradient.addColorStop(0, `rgba(${fg.r}, ${fg.g}, ${fg.b}, 1)`);
     gradient.addColorStop(1, `rgba(${bg.r}, ${bg.g}, ${bg.b}, 1)`);
@@ -1264,6 +1277,10 @@ export function EditorCanvas() {
     // Always capture pointer so we keep getting move/up events even outside canvas
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 
+    // Ignore non-primary buttons: right-click used to fall through to the
+    // tool branches and paint/drag while the context menu opened.
+    if (e.button !== 0 && e.button !== 1) return;
+
     if (e.button === 1 || (e.button === 0 && (activeTool === 'hand' || spacePressed.current || (e.altKey && activeTool !== 'eyedropper' && activeTool !== 'zoom' && activeTool !== 'clone-stamp' && activeTool !== 'heal-brush')))) {
       // Pan with middle mouse or hand tool or Alt+click (but NOT for eyedropper,
       // zoom, clone-stamp, or heal-brush — those tools use Alt+Click for their
@@ -1272,9 +1289,11 @@ export function EditorCanvas() {
       return;
     }
 
-    const pt = toCanvasCoords(e.clientX, e.clientY);
+    // Snapshot the tool for the whole gesture — commit paths read this so a
+    // mid-drag keyboard tool switch can't change what the stroke does.
+    drawingToolRef.current = activeTool;
 
-    // Eyedropper
+    const pt = toCanvasCoords(e.clientX, e.clientY);
     if (activeTool === 'eyedropper') {
       const composite = compositeCanvasRef.current;
       if (composite) {
@@ -1380,7 +1399,9 @@ export function EditorCanvas() {
         }
       }
       polygonPointsRef.current.push(pt);
-      forceRender(v => v + 1);
+      // Redraw the overlay so the in-progress polygon path + rubber band is
+      // actually visible (forceRender alone never re-runs the overlay draw).
+      drawOverlay();
       return;
     }
 
@@ -1476,6 +1497,10 @@ export function EditorCanvas() {
       }
       drawingRef.current = true;
       strokePointsRef.current = [pt];
+      // Reset the stabilizer seed for THIS stroke: it used to survive from
+      // the previous stroke's end point, so with stabilizer > 0 every stroke
+      // after the first began with a stray line back to where the last one ended.
+      stabilizerPosRef.current = pt;
       // For blob/calligraphy/scatter/smooth tools, we draw directly on the layer
       // For brush/pencil/eraser, we use the stroke canvas approach
       if (activeTool === 'brush' || activeTool === 'pencil' || activeTool === 'eraser') {
@@ -1659,6 +1684,10 @@ export function EditorCanvas() {
     setSelection, createLassoMask, setForeground, getActiveLayer,
     docWidth, docHeight, drawCloneStamp, drawHealStroke, drawPenPath, applyLiquify,
     settingSource, setSettingSource,
+    // selectionMask + selectionBounds are read by the move-tool branch
+    // (moveSourceRef / moveStartBoundsRef) — omitting them captured stale
+    // values when the user selected then immediately moved.
+    selectionMask, selectionBounds,
     // Magnetic lasso additions: composite + snapToEdge + drawOverlay are now
     // called from onPointerDown (to snapshot the canvas, snap the start point,
     // and refresh the overlay after adding/closing a point).
@@ -1790,8 +1819,10 @@ export function EditorCanvas() {
       const start = startPointRef.current!;
       ctx.save();
       if (activeTool === 'gradient') {
-        const fg = hexToRgb(foreground);
-        const bg = hexToRgb(background);
+        // hexToRgb can return null for malformed strings — fall back to
+        // sensible defaults instead of crashing on fg.r of null.
+        const fg = hexToRgb(foreground) ?? { r: 0, g: 0, b: 0 };
+        const bg = hexToRgb(background) ?? { r: 255, g: 255, b: 255 };
         const grad = ctx.createLinearGradient(start.x, start.y, pt.x, pt.y);
         grad.addColorStop(0, `rgba(${fg.r}, ${fg.g}, ${fg.b}, 0.8)`);
         grad.addColorStop(1, `rgba(${bg.r}, ${bg.g}, ${bg.b}, 0.8)`);
@@ -1809,6 +1840,9 @@ export function EditorCanvas() {
     }
 
     if (activeTool === 'brush' || activeTool === 'pencil' || activeTool === 'eraser') {
+      // Use the gesture's starting tool for erase/hardness flags — a mid-drag
+      // tool switch must not retroactively turn the stroke into an erase.
+      const gestureTool = drawingToolRef.current ?? activeTool;
       // Brush stabilizer: weighted moving average for smoother strokes
       let targetPt = pt;
       if (toolOptions.brushStabilizer > 0) {
@@ -1826,13 +1860,13 @@ export function EditorCanvas() {
         stabilizerPosRef.current = pt;
       }
       const last = lastPointRef.current ?? targetPt;
-      const hardness = activeTool === 'pencil' ? 100 : toolOptions.brushHardness;
+      const hardness = gestureTool === 'pencil' ? 100 : toolOptions.brushHardness;
       drawStrokeSegment(last, targetPt, {
         color: foreground,
         size: toolOptions.brushSize,
         hardness,
         opacity: toolOptions.brushOpacity,
-        erase: activeTool === 'eraser',
+        erase: gestureTool === 'eraser',
       });
       previewStroke();
       lastPointRef.current = targetPt;
@@ -1975,10 +2009,36 @@ export function EditorCanvas() {
   ]);
 
   const onPointerUp = useCallback((e: React.PointerEvent) => {
+    // pointercancel carries stale/(0,0) coordinates — committing with them
+    // created a marquee selection from the document origin. Abort the
+    // gesture instead: reset refs and redraw, no commit.
+    if (e.type === 'pointercancel') {
+      drawingRef.current = false;
+      drawingToolRef.current = null;
+      startPointRef.current = null;
+      lastPointRef.current = null;
+      stabilizerPosRef.current = null;
+      strokePointsRef.current = [];
+      marqueePreviewRef.current = null;
+      moveOffsetRef.current = null;
+      panStartRef.current = null;
+      lassoPointsRef.current = [];
+      polygonPointsRef.current = [];
+      clearStrokeCanvas();
+      composite();
+      drawOverlay();
+      return;
+    }
+
     // Commit the final cursor position to the status-bar state (it was
     // throttled during the drag itself).
     cursorPosRef.current = toCanvasCoords(e.clientX, e.clientY);
     setCursorPos(cursorPosRef.current);
+
+    // The tool captured at pointer-down decides how this gesture commits —
+    // NOT the (possibly switched) current tool.
+    const gestureTool = drawingToolRef.current ?? activeTool;
+    drawingToolRef.current = null;
 
     if (panStartRef.current) {
       panStartRef.current = null;
@@ -1991,10 +2051,10 @@ export function EditorCanvas() {
     const pt = toCanvasCoords(e.clientX, e.clientY);
     const start = startPointRef.current;
 
-    if (activeTool === 'marquee-rect' || activeTool === 'marquee-ellipse' || activeTool === 'lasso' || activeTool === 'magnetic-lasso') {
+    if (gestureTool === 'marquee-rect' || gestureTool === 'marquee-ellipse' || gestureTool === 'lasso' || gestureTool === 'magnetic-lasso') {
       // Marquee: commit the selection once here — the drag itself only drew
       // an overlay preview (no store writes per move).
-      if (activeTool === 'marquee-rect' || activeTool === 'marquee-ellipse') {
+      if (gestureTool === 'marquee-rect' || gestureTool === 'marquee-ellipse') {
         const mstart = startPointRef.current;
         if (mstart && Math.abs(pt.x - mstart.x) >= 1 && Math.abs(pt.y - mstart.y) >= 1) {
           const { mask, bounds } = createRectMask(
@@ -2046,7 +2106,7 @@ export function EditorCanvas() {
       return;
     }
 
-    if (activeTool === 'crop') {
+    if (gestureTool === 'crop') {
       // Apply crop: use the dragged preview rect, or fall back to the
       // existing selection if the user clicked without dragging.
       const preview = marqueePreviewRef.current;
@@ -2055,23 +2115,35 @@ export function EditorCanvas() {
         ? preview
         : (selectionBounds && selectionBounds.w > 5 && selectionBounds.h > 5 ? selectionBounds : null);
       if (rect) {
-        // Crop all layers
+        // Crop all layers. Round the offsets — drawImage at fractional
+        // positions resamples every pixel and subtly blurred the whole
+        // document. Layer masks are cropped identically (they used to keep
+        // their old full-size geometry and point at the wrong region).
         const { x, y, w, h } = rect;
+        const rx = Math.round(x);
+        const ry = Math.round(y);
+        const rw = Math.max(1, Math.round(w));
+        const rh = Math.max(1, Math.round(h));
         const newLayers = useEditorStore.getState().layers.map((l) => {
-          const newCanvas = createBlankCanvas(Math.round(w), Math.round(h));
+          const newCanvas = createBlankCanvas(rw, rh);
           const ctx = newCanvas.getContext('2d')!;
-          ctx.drawImage(l.canvas, -x, -y);
-          return { ...l, canvas: newCanvas, thumbnail: generateThumbnail(newCanvas) };
+          ctx.drawImage(l.canvas, -rx, -ry);
+          let maskCanvas: HTMLCanvasElement | null = null;
+          if (l.maskCanvas) {
+            maskCanvas = createBlankCanvas(rw, rh);
+            maskCanvas.getContext('2d')!.drawImage(l.maskCanvas, -rx, -ry);
+          }
+          return { ...l, canvas: newCanvas, thumbnail: generateThumbnail(newCanvas), maskCanvas };
         });
         useEditorStore.setState({
           layers: newLayers,
-          docWidth: Math.round(w),
-          docHeight: Math.round(h),
+          docWidth: rw,
+          docHeight: rh,
           selectionMask: null,
           selectionBounds: null,
         });
         pushHistory('Crop');
-        toast.success(`Cropped to ${Math.round(w)} × ${Math.round(h)}`);
+        toast.success(`Cropped to ${rw} × ${rh}`);
       } else {
         clearSelection();
       }
@@ -2081,27 +2153,28 @@ export function EditorCanvas() {
     // Move tool: the live preview already painted the final state into the
     // layer canvas. Commit the translated selection ONCE (single store
     // update + single contour re-trace), then push a history entry.
-    if (activeTool === 'move') {
+    if (gestureTool === 'move') {
       const layer = getActiveLayer();
       if (layer && !layer.locked) {
         if (moveSourceRef.current) {
-          // The layer already has the moved content from onPointerMove.
-          // If the user didn't actually move (click without drag), the
-          // layer is unchanged — still push a lightweight entry so undo
-          // works if they did drag.
-          if (moveStartMaskRef.current && moveStartBoundsRef.current && moveOffsetRef.current) {
-            const { dx, dy } = moveOffsetRef.current;
-            const translatedMask = createBlankCanvas(docWidth, docHeight);
-            translatedMask.getContext('2d')!.drawImage(moveStartMaskRef.current, dx, dy);
-            setSelection(translatedMask, {
-              x: moveStartBoundsRef.current.x + dx,
-              y: moveStartBoundsRef.current.y + dy,
-              w: moveStartBoundsRef.current.w,
-              h: moveStartBoundsRef.current.h,
-            });
+          const offset = moveOffsetRef.current;
+          // Only push history when the layer actually moved — a plain click
+          // used to snapshot every layer into a useless duplicate entry.
+          if (offset && (offset.dx !== 0 || offset.dy !== 0)) {
+            if (moveStartMaskRef.current && moveStartBoundsRef.current) {
+              const { dx, dy } = offset;
+              const translatedMask = createBlankCanvas(docWidth, docHeight);
+              translatedMask.getContext('2d')!.drawImage(moveStartMaskRef.current, dx, dy);
+              setSelection(translatedMask, {
+                x: moveStartBoundsRef.current.x + dx,
+                y: moveStartBoundsRef.current.y + dy,
+                w: moveStartBoundsRef.current.w,
+                h: moveStartBoundsRef.current.h,
+              });
+            }
+            refreshThumbnail(layer.id);
+            pushHistory('Move');
           }
-          refreshThumbnail(layer.id);
-          pushHistory('Move');
         }
       }
       moveSourceRef.current = null;
@@ -2115,41 +2188,43 @@ export function EditorCanvas() {
       return;
     }
 
-    if (activeTool === 'gradient' && start) {
+    if (gestureTool === 'gradient' && start) {
       gradientFill(start, pt);
       return;
     }
 
     // Handle all shape tools
-    if (activeTool.startsWith('shape-') && start) {
-      const shapeName = activeTool.replace('shape-', '');
+    if (gestureTool.startsWith('shape-') && start) {
+      const shapeName = gestureTool.replace('shape-', '');
       drawShape(start, pt, shapeName);
       return;
     }
 
     // Handle new brush tools (blob, calligraphy, scatter, smooth)
-    if (activeTool === 'blob-brush' || activeTool === 'calligraphy-brush' || activeTool === 'scatter-brush' || activeTool === 'smooth-tool') {
+    if (gestureTool === 'blob-brush' || gestureTool === 'calligraphy-brush' || gestureTool === 'scatter-brush' || gestureTool === 'smooth-tool') {
       const layer = getActiveLayer();
       if (layer) {
         refreshThumbnail(layer.id);
-        pushHistory(activeTool.replace('-', ' '));
+        pushHistory(gestureTool.replace('-', ' '));
       }
       strokePointsRef.current = [];
       lastPointRef.current = null;
+      stabilizerPosRef.current = null;
       composite();
       return;
     }
 
-    if (activeTool === 'brush' || activeTool === 'pencil' || activeTool === 'eraser') {
+    if (gestureTool === 'brush' || gestureTool === 'pencil' || gestureTool === 'eraser') {
       commitStrokeToLayer();
       clearStrokeCanvas();
-      pushHistory(activeTool === 'eraser' ? 'Erase' : activeTool === 'pencil' ? 'Pencil' : 'Brush Stroke');
+      pushHistory(gestureTool === 'eraser' ? 'Erase' : gestureTool === 'pencil' ? 'Pencil' : 'Brush Stroke');
       lastPointRef.current = null;
+      stabilizerPosRef.current = null;
       composite();
       return;
     }
 
-    if (activeTool === 'clone-stamp') {
+    if (gestureTool === 'clone-stamp') {
       const layer = getActiveLayer();
       if (layer) {
         refreshThumbnail(layer.id);
@@ -2160,7 +2235,7 @@ export function EditorCanvas() {
       return;
     }
 
-    if (activeTool === 'heal-brush') {
+    if (gestureTool === 'heal-brush') {
       const layer = getActiveLayer();
       if (layer) {
         refreshThumbnail(layer.id);
@@ -2171,11 +2246,11 @@ export function EditorCanvas() {
       return;
     }
 
-    if (activeTool === 'liquify-push' || activeTool === 'liquify-pucker' || activeTool === 'liquify-bloat' || activeTool === 'liquify-twirl') {
+    if (gestureTool === 'liquify-push' || gestureTool === 'liquify-pucker' || gestureTool === 'liquify-bloat' || gestureTool === 'liquify-twirl') {
       const layer = getActiveLayer();
       if (layer) {
         refreshThumbnail(layer.id);
-        pushHistory(`Liquify ${activeTool.split('-')[1]}`);
+        pushHistory(`Liquify ${gestureTool.split('-')[1]}`);
       }
       liquifyLastRef.current = null;
       composite();
@@ -2191,16 +2266,43 @@ export function EditorCanvas() {
     drawOverlay,
   ]);
 
-  // Wheel for zoom & pan
-  const onWheel = useCallback((e: React.WheelEvent) => {
-    if (e.ctrlKey || e.metaKey) {
-      // Zoom
-      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-      setZoom(zoom * factor);
-    } else {
-      setPan(panX - e.deltaX, panY - e.deltaY);
-    }
-  }, [zoom, setZoom, panX, panY, setPan]);
+  // Wheel for zoom & pan. Attached as a NATIVE non-passive listener:
+  // React 19 attaches wheel listeners passively at the root, so
+  // e.preventDefault() inside a React onWheel handler is ignored — the
+  // browser page zoomed on top of the app zoom on every pinch (ctrl+wheel)
+  // gesture. Zoom is also anchored at the cursor now (the canvas point under
+  // the pointer stays fixed; previously it drifted toward the top-left).
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheelNative = (e: WheelEvent) => {
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey) {
+        const state = useEditorStore.getState();
+        const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+        const newZoom = Math.max(0.05, Math.min(32, state.zoom * factor));
+        if (newZoom === state.zoom) return;
+        const rect = el.getBoundingClientRect();
+        // Current canvas-space point under the cursor.
+        const dispW = state.docWidth * state.zoom;
+        const dispH = state.docHeight * state.zoom;
+        const offX = state.panX || (rect.width - dispW) / 2;
+        const offY = state.panY || (rect.height - dispH) / 2;
+        const docX = (e.clientX - rect.left - offX) / state.zoom;
+        const docY = (e.clientY - rect.top - offY) / state.zoom;
+        // Keep that point under the cursor at the new zoom.
+        const newOffX = e.clientX - rect.left - docX * newZoom;
+        const newOffY = e.clientY - rect.top - docY * newZoom;
+        state.setZoom(newZoom);
+        state.setPan(newOffX, newOffY);
+      } else {
+        const state = useEditorStore.getState();
+        state.setPan(state.panX - e.deltaX, state.panY - e.deltaY);
+      }
+    };
+    el.addEventListener('wheel', onWheelNative, { passive: false });
+    return () => el.removeEventListener('wheel', onWheelNative);
+  }, []);
 
   // Double-click handler: close the in-progress magnetic or polygonal lasso.
   // This matches Photoshop's UX where double-clicking anywhere closes the path
@@ -2258,12 +2360,22 @@ export function EditorCanvas() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // Don't intercept when typing in inputs
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if ((e.target as HTMLElement)?.isContentEditable) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (target?.isContentEditable) return;
+      // Radix widgets (Select listbox, Slider, Dialog focus traps, menus) are
+      // DIV-based and slipped through the tag check — letter keys switched
+      // tools behind an open dialog and number keys retargeted layer opacity
+      // while a slider had focus.
+      if (target?.closest('[role="listbox"], [role="slider"], [role="dialog"], [role="menu"], [role="menubar"], [data-radix-focus-guard]')) return;
 
       const store = useEditorStore.getState();
       const mod = e.ctrlKey || e.metaKey; // Ctrl on Win/Linux, Cmd on macOS
+      // Don't switch tools mid-stroke: the in-flight gesture must keep its
+      // tool (see drawingToolRef) — and a stray keystroke while dragging
+      // shouldn't flip the active tool under the cursor.
+      const midStroke = drawingRef.current;
 
       // --- Ctrl/Cmd+key shortcuts (editing actions) ---
       if (mod) {
@@ -2278,7 +2390,24 @@ export function EditorCanvas() {
         else if (e.key === 's' && !e.shiftKey) { e.preventDefault(); window.dispatchEvent(new CustomEvent('pixel-lab-quick-export')); }
         else if (e.key === 's' && e.shiftKey) { e.preventDefault(); window.dispatchEvent(new CustomEvent('pixel-lab-export-jpeg')); }
         else if (e.key === 'c' && !e.shiftKey) { e.preventDefault(); store.copySelection(); }
-        else if (e.key === 'x' && !e.shiftKey) { e.preventDefault(); store.copySelection(); /* cut = copy + delete selection */ }
+        else if (e.key === 'x' && !e.shiftKey) {
+          // Cut = copy + DELETE the selected pixels (was copy-only: Ctrl+V
+          // after Ctrl+X duplicated the region instead of moving it).
+          e.preventDefault();
+          store.copySelection();
+          if (store.selectionMask && store.activeLayerId) {
+            const layer = store.layers.find((l) => l.id === store.activeLayerId);
+            if (layer && !layer.locked) {
+              const ctx = layer.canvas.getContext('2d')!;
+              ctx.save();
+              ctx.globalCompositeOperation = 'destination-out';
+              ctx.drawImage(store.selectionMask, 0, 0);
+              ctx.restore();
+              store.refreshThumbnail(layer.id);
+              store.pushHistory('Cut');
+            }
+          }
+        }
         else if (e.key === 'v' && !e.shiftKey) { e.preventDefault(); store.pasteAsNewLayer(); }
         else if (e.key === 'v' && e.shiftKey) { e.preventDefault(); window.dispatchEvent(new CustomEvent('open-vectorize-dialog')); }
         else if (e.key === 'j' && !e.shiftKey) {
@@ -2287,10 +2416,23 @@ export function EditorCanvas() {
           if (store.activeLayerId) store.duplicateLayer(store.activeLayerId);
         }
         else if (e.key === 'j' && e.shiftKey) {
-          // Cut to new layer (Photoshop: Ctrl+Shift+J)
+          // Cut to new layer (Photoshop: Ctrl+Shift+J) — actually CUT now
+          // (was duplicate: copy + paste without deleting the source pixels).
           e.preventDefault();
           store.copySelection();
+          if (store.selectionMask && store.activeLayerId) {
+            const layer = store.layers.find((l) => l.id === store.activeLayerId);
+            if (layer && !layer.locked) {
+              const ctx = layer.canvas.getContext('2d')!;
+              ctx.save();
+              ctx.globalCompositeOperation = 'destination-out';
+              ctx.drawImage(store.selectionMask, 0, 0);
+              ctx.restore();
+              store.refreshThumbnail(layer.id);
+            }
+          }
           store.pasteAsNewLayer();
+          if (store.selectionMask && store.activeLayerId) store.pushHistory('Cut to New Layer');
         }
         else if (e.key === 'n' && e.shiftKey) {
           // New layer (Photoshop: Ctrl+Shift+N)
@@ -2342,7 +2484,23 @@ export function EditorCanvas() {
         }
         else if (e.key === '+' || e.key === '=') { e.preventDefault(); setZoom(zoom * 1.25); }
         else if (e.key === '-' || e.key === '_') { e.preventDefault(); setZoom(zoom / 1.25); }
-        else if (e.key === '0') { e.preventDefault(); setZoom(1); }
+        else if (e.key === '0') {
+          // Fit on screen (Photoshop convention — the shortcuts dialog
+          // documents Ctrl+0 as "Fit on Screen"; it used to alias Ctrl+1).
+          e.preventDefault();
+          if (containerRef.current) {
+            const rect = containerRef.current.getBoundingClientRect();
+            if (rect.width > 50 && rect.height > 50) {
+              const margin = 40;
+              const fitZoom = Math.min(
+                (rect.width - margin) / store.docWidth,
+                (rect.height - margin) / store.docHeight,
+              );
+              setZoom(Math.max(0.05, fitZoom));
+              useEditorStore.getState().setPan(0, 0);
+            }
+          }
+        }
         else if (e.key === '1') { e.preventDefault(); setZoom(1); }
         else if (e.key === '2') { e.preventDefault(); window.dispatchEvent(new CustomEvent('pixel-lab-toggle-panels')); }
         else if (e.key === ';') { e.preventDefault(); store.toggleRulers(); }
@@ -2433,9 +2591,10 @@ export function EditorCanvas() {
         return;
       }
 
-      // --- Single-letter tool shortcuts ---
+      // --- Single-letter tool shortcuts (not while a stroke is in flight) ---
       const key = e.key.toLowerCase();
       if (TOOL_SHORTCUTS[key]) {
+        if (midStroke) return;
         setTool(TOOL_SHORTCUTS[key]);
         return;
       }
@@ -2451,20 +2610,23 @@ export function EditorCanvas() {
       }
 
       // --- Brush size / hardness ---
+      // Hardness checks come FIRST and match on e.code: with Shift held,
+      // e.key is '{'/'}' on standard layouts, so the old `e.shiftKey &&
+      // e.key === '['` branches were unreachable dead code.
+      if (e.shiftKey && (e.code === 'BracketLeft' || e.key === '{')) {
+        setToolOptions({ brushHardness: Math.max(0, toolOptions.brushHardness - 10) });
+        return;
+      }
+      if (e.shiftKey && (e.code === 'BracketRight' || e.key === '}')) {
+        setToolOptions({ brushHardness: Math.min(100, toolOptions.brushHardness + 10) });
+        return;
+      }
       if (e.key === '[') {
         setToolOptions({ brushSize: Math.max(1, toolOptions.brushSize - 5) });
         return;
       }
       if (e.key === ']') {
         setToolOptions({ brushSize: Math.min(500, toolOptions.brushSize + 5) });
-        return;
-      }
-      if (e.shiftKey && e.key === '[') {
-        setToolOptions({ brushHardness: Math.max(0, toolOptions.brushHardness - 10) });
-        return;
-      }
-      if (e.shiftKey && e.key === ']') {
-        setToolOptions({ brushHardness: Math.min(100, toolOptions.brushHardness + 10) });
         return;
       }
 
@@ -2483,21 +2645,37 @@ export function EditorCanvas() {
       if (e.key === ' ') spacePressed.current = false;
     };
     window.addEventListener('keyup', upHandler);
+    // If the window loses focus while Space is held, the keyup never arrives
+    // and spacePressed sticks true — the next canvas click pans instead of
+    // drawing. Reset on blur/visibility change.
+    const resetSpace = () => { spacePressed.current = false; };
+    window.addEventListener('blur', resetSpace);
+    document.addEventListener('visibilitychange', resetSpace);
     return () => {
       window.removeEventListener('keydown', handler);
       window.removeEventListener('keyup', upHandler);
+      window.removeEventListener('blur', resetSpace);
+      document.removeEventListener('visibilitychange', resetSpace);
     };
   }, [zoom, setZoom, setTool, setToolOptions, toolOptions.brushSize, toolOptions.brushHardness, commitPenPath, composite]);
 
-  // Auto-fit zoom to container
+  // Auto-fit zoom to container — ONLY on first measurement or when the
+  // document dimensions change. Re-fitting on every container resize
+  // (panel toggle, mobile keyboard opening) destroyed the user's zoom/pan
+  // mid-edit.
   const lastFitW = useRef(0);
   const lastFitH = useRef(0);
+  const lastFitDocW = useRef(0);
+  const lastFitDocH = useRef(0);
   useEffect(() => {
     if (containerSize.w < 50 || containerSize.h < 50 || docWidth === 0) return;
-    // Re-fit if container dimensions changed (covers initial load, viewport resize, mobile/desktop switch)
-    if (containerSize.w === lastFitW.current && containerSize.h === lastFitH.current) return;
+    const firstMeasure = lastFitW.current === 0 && lastFitH.current === 0;
+    const docChanged = docWidth !== lastFitDocW.current || docHeight !== lastFitDocH.current;
+    if (!firstMeasure && !docChanged) return;
     lastFitW.current = containerSize.w;
     lastFitH.current = containerSize.h;
+    lastFitDocW.current = docWidth;
+    lastFitDocH.current = docHeight;
     // Use smaller margin on mobile to maximize canvas area
     const margin = containerSize.w < 500 ? 20 : 60;
     const fitZoom = Math.min(
@@ -2538,8 +2716,8 @@ export function EditorCanvas() {
     <div
       ref={containerRef}
       className="relative flex-1 overflow-hidden editor-canvas-bg touch-none"
-      onWheel={onWheel}
       style={{ cursor: cursorStyle() }}
+      onContextMenu={(e) => e.preventDefault()}
     >
       {/* Canvas wrapper - positioned absolutely */}
       <div

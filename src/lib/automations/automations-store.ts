@@ -71,14 +71,30 @@ interface AutomationsState {
 
 const LS_KEY = 'pixel-lab-automations';
 
-// Load saved automations from localStorage.
+// Hard cap on stored recipes — protects localStorage quota and keeps the
+// recipe runner's work bounded.
+const MAX_AUTOMATIONS = 100;
+
+// Load saved automations from localStorage (shape-validated: an unvalidated
+// cast fed malformed entries into the UI and the executor).
 function loadInitialAutomations(): Automation[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = window.localStorage.getItem(LS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed as Automation[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((a): a is Automation =>
+        typeof a === 'object' && a !== null
+        && typeof a.id === 'string'
+        && typeof a.name === 'string'
+        && Array.isArray(a.steps)
+        && a.steps.every((s: unknown) =>
+          typeof s === 'object' && s !== null
+          && typeof (s as { toolName?: unknown }).toolName === 'string'
+          && typeof (s as { args?: unknown }).args === 'object'))
+      .slice(0, MAX_AUTOMATIONS);
   } catch {
     /* ignore — corrupt storage */
   }

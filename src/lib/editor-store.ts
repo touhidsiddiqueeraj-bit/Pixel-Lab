@@ -13,6 +13,7 @@ import {
   createBlankCanvas,
   canvasToDataUrl,
   generateThumbnail,
+  clampImageSize,
 } from './image-processing';
 import { featherSelection as featherMask } from './image-processing';
 import { getPerfSettings, type PerfSettings } from './perf';
@@ -75,6 +76,10 @@ interface EditorState {
   // History
   history: HistoryEntry[];
   historyIndex: number; // -1 = at latest
+  /** True while an undo/redo restore is decoding — mutations that snapshot
+   * history (pushHistory) are deferred/skipped during this window to avoid
+   * desyncing index vs. content. */
+  isRestoring: boolean;
 
   // UI
   zoom: number;
@@ -83,6 +88,11 @@ interface EditorState {
 
   // Actions
   newDocument: (w: number, h: number, bg: string) => void;
+  /** Safely open a decoded image as a new document. Validates/clamps
+   * dimensions (blocks “dimension bomb” images), commits synchronously
+   * (no setTimeout race with a concurrent open), and pushes one history
+   * entry. Returns false (with a toast) when the image is unusable. */
+  openImage: (img: HTMLImageElement, layerName: string, historyLabel?: string) => boolean;
   setTool: (tool: ToolType) => void;
   setToolOptions: (opts: Partial<ToolOptions>) => void;
   setForeground: (color: string) => void;
@@ -195,6 +205,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   history: [],
   historyIndex: -1,
+  isRestoring: false,
 
   zoom: 1,
   panX: 0,
@@ -273,10 +284,24 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   showGrid: false,
 
   newDocument: (w, h, bg) => {
-    const bgCanvas = createBlankCanvas(w, h);
+    // Validate before allocating: negative/huge values either silently wrap
+    // (WebIDL unsigned long) or freeze the tab with a multi-GB canvas.
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w < 1 || h < 1) {
+      toast.error('Invalid document dimensions');
+      return;
+    }
+    const { w: cw, h: ch } = clampImageSize(w, h);
+    if (cw !== Math.floor(w) || ch !== Math.floor(h)) {
+      toast.info(`Document size clamped to ${cw}×${ch} (canvas safety limit)`);
+    }
+    const bgCanvas = createBlankCanvas(cw, ch);
     const bgCtx = bgCanvas.getContext('2d')!;
-    bgCtx.fillStyle = bg;
-    bgCtx.fillRect(0, 0, w, h);
+    // 'transparent'/'none' are not valid CSS colors — assigning them to
+    // fillStyle is silently ignored, leaving the default BLACK background.
+    if (bg && bg !== 'transparent' && bg !== 'none') {
+      bgCtx.fillStyle = bg;
+      bgCtx.fillRect(0, 0, cw, ch);
+    }
     const bgLayer: LayerData = {
       id: generateId(),
       name: 'Background',
@@ -290,8 +315,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       maskEnabled: true,
     };
     set({
-      docWidth: w,
-      docHeight: h,
+      docWidth: cw,
+      docHeight: ch,
       layers: [bgLayer],
       activeLayerId: bgLayer.id,
       history: [],
@@ -306,6 +331,73 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
     // push initial state
     setTimeout(() => get().pushHistory('New Document'), 0);
+  },
+
+  openImage: (img, layerName, historyLabel = 'Open Image') => {
+    const natW = img.naturalWidth;
+    const natH = img.naturalHeight;
+    if (!Number.isFinite(natW) || !Number.isFinite(natH) || natW < 1 || natH < 1) {
+      toast.error('Image has no usable dimensions (is it a valid image?)');
+      return false;
+    }
+    const { w, h } = clampImageSize(natW, natH);
+    if (w !== natW || h !== natH) {
+      toast.info(`Image downscaled from ${natW}×${natH} to ${w}×${h} (canvas safety limit)`);
+    }
+    // White background layer + image layer, committed synchronously. The
+    // previous callers did newDocument() then setTimeout(() => addLayer…)
+    // which raced any other open/new in that window and attached the image
+    // to the WRONG document.
+    const bgCanvas = createBlankCanvas(w, h);
+    const bgCtx = bgCanvas.getContext('2d')!;
+    bgCtx.fillStyle = '#ffffff';
+    bgCtx.fillRect(0, 0, w, h);
+    const bgLayer: LayerData = {
+      id: generateId(),
+      name: 'Background',
+      visible: true,
+      opacity: 1,
+      blendMode: 'source-over',
+      locked: false,
+      canvas: bgCanvas,
+      thumbnail: generateThumbnail(bgCanvas),
+      maskCanvas: null,
+      maskEnabled: true,
+    };
+    const imgCanvas = createBlankCanvas(w, h);
+    imgCanvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
+    const imgLayer: LayerData = {
+      id: generateId(),
+      name: layerName,
+      visible: true,
+      opacity: 1,
+      blendMode: 'source-over',
+      locked: false,
+      canvas: imgCanvas,
+      thumbnail: generateThumbnail(imgCanvas),
+      maskCanvas: null,
+      maskEnabled: true,
+    };
+    set({
+      docWidth: w,
+      docHeight: h,
+      layers: [bgLayer, imgLayer],
+      activeLayerId: imgLayer.id,
+      history: [],
+      historyIndex: -1,
+      zoom: 1,
+      panX: 0,
+      panY: 0,
+      selectionMask: null,
+      selectionBounds: null,
+      editingMask: false,
+      guides: { x: [], y: [] },
+    });
+    get().pushHistory(historyLabel);
+    // Downscaled thumbnail keeps the recent-files list from hoarding ~10
+    // full-resolution JPEG data URLs in memory.
+    get().addRecentFile(layerName, generateThumbnail(imgCanvas, 512));
+    return true;
   },
 
   setTool: (tool) => set({ activeTool: tool }),
@@ -391,7 +483,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ctx.save();
       ctx.globalAlpha = top.opacity;
       ctx.globalCompositeOperation = top.blendMode;
-      ctx.drawImage(top.canvas, 0, 0);
+      // Apply the top layer's mask — merging a masked layer previously
+      // resurrected the pixels the mask was hiding.
+      drawLayerWithMask(ctx, top, s.docWidth, s.docHeight);
       ctx.restore();
       const newLayers = [...s.layers];
       newLayers.splice(idx, 1);
@@ -416,7 +510,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         ctx.save();
         ctx.globalAlpha = layer.opacity;
         ctx.globalCompositeOperation = layer.blendMode;
-        ctx.drawImage(layer.canvas, 0, 0);
+        drawLayerWithMask(ctx, layer, s.docWidth, s.docHeight);
         ctx.restore();
       }
       const newLayer: LayerData = {
@@ -450,7 +544,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         ctx.save();
         ctx.globalAlpha = layer.opacity;
         ctx.globalCompositeOperation = layer.blendMode;
-        ctx.drawImage(layer.canvas, 0, 0);
+        drawLayerWithMask(ctx, layer, s.docWidth, s.docHeight);
         ctx.restore();
       }
       const newLayer: LayerData = {
@@ -481,6 +575,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   })),
 
   reorderLayers: (fromIndex, toIndex) => set((s) => {
+    // Validate both indices — a stale drag index racing a layer deletion
+    // spliced `undefined` into the layers array and crashed every consumer.
+    const len = s.layers.length;
+    if (fromIndex < 0 || fromIndex >= len || toIndex < 0 || toIndex >= len) return s;
+    if (fromIndex === toIndex) return s;
     const newLayers = [...s.layers];
     const [moved] = newLayers.splice(fromIndex, 1);
     newLayers.splice(toIndex, 0, moved);
@@ -548,17 +647,24 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   invertSelection: () => {
     const { selectionMask, docWidth, docHeight } = get();
     if (!selectionMask) {
-      // If no selection, invert means select nothing (empty mask) - unusual. Or select nothing then everything. Photoshop makes empty selection.
-      const mask = createBlankCanvas(docWidth, docHeight);
-      set({ selectionMask: mask, selectionBounds: { x: 0, y: 0, w: 0, h: 0 } });
+      // Photoshop semantics: inverting an empty selection selects everything.
+      // (The old behavior created a truthy-but-empty mask, which made every
+      // selection-aware paint op clip to zero pixels — the user couldn't draw
+      // at all until pressing Esc.)
+      get().selectAll();
       return;
     }
+    // Read the mask at ITS OWN dimensions — after a crop/resize the mask can
+    // be smaller or larger than the document, and getImageData with doc dims
+    // throws IndexSizeError.
+    const mw = selectionMask.width;
+    const mh = selectionMask.height;
     // A selection mask is defined by its ALPHA channel — that is what the
     // clipping drawImage calls and the marching-ants trace read. Invert the
     // alpha (the previous implementation inverted RGB and kept alpha, which
     // left both the mask semantics and the ants completely unchanged).
     const ctx = selectionMask.getContext('2d', { willReadFrequently: true })!;
-    const imageData = ctx.getImageData(0, 0, docWidth, docHeight);
+    const imageData = ctx.getImageData(0, 0, mw, mh);
     const data = imageData.data;
     for (let i = 0; i < data.length; i += 4) {
       data[i] = 255;
@@ -571,7 +677,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // reference; an in-place mutation kept the same reference so nobody
     // refreshed. The inverted selection can extend anywhere in the
     // document, so bounds become the full document.
-    const newMask = createBlankCanvas(docWidth, docHeight);
+    const newMask = createBlankCanvas(mw, mh);
     newMask.getContext('2d')!.putImageData(imageData, 0, 0);
     set({ selectionMask: newMask, selectionBounds: { x: 0, y: 0, w: docWidth, h: docHeight } });
   },
@@ -592,23 +698,30 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   expandSelection: (pixels) => {
     const { selectionMask, docWidth, docHeight } = get();
     if (!selectionMask || pixels <= 0) return;
-    // Dilate the mask
+    // Dilate the mask — read/write at the mask's own dimensions (it can be
+    // stale relative to the document after crop/resize).
+    const mw = selectionMask.width;
+    const mh = selectionMask.height;
     const ctx = selectionMask.getContext('2d', { willReadFrequently: true })!;
-    const imageData = ctx.getImageData(0, 0, docWidth, docHeight);
+    const imageData = ctx.getImageData(0, 0, mw, mh);
     const src = imageData.data;
     const dst = new Uint8ClampedArray(src);
     const r = Math.max(1, Math.round(pixels));
-    for (let y = 0; y < docHeight; y++) {
-      for (let x = 0; x < docWidth; x++) {
-        const idx = (y * docWidth + x) * 4;
+    // Cap the radius: the per-pixel neighborhood scan is O(w·h·r²) — radius
+    // 200 on a 12 MP document was ~2.4 trillion inner iterations (minutes of
+    // frozen tab). Above the cap the dilation falls back to the max.
+    const rClamped = Math.min(r, 64);
+    for (let y = 0; y < mh; y++) {
+      for (let x = 0; x < mw; x++) {
+        const idx = (y * mw + x) * 4;
         // Check if any neighbor within radius is selected
         let maxAlpha = 0;
-        for (let dy = -r; dy <= r; dy++) {
-          for (let dx = -r; dx <= r; dx++) {
-            if (dx * dx + dy * dy > r * r) continue;
+        for (let dy = -rClamped; dy <= rClamped; dy++) {
+          for (let dx = -rClamped; dx <= rClamped; dx++) {
+            if (dx * dx + dy * dy > rClamped * rClamped) continue;
             const nx = x + dx, ny = y + dy;
-            if (nx < 0 || nx >= docWidth || ny < 0 || ny >= docHeight) continue;
-            const nIdx = (ny * docWidth + nx) * 4;
+            if (nx < 0 || nx >= mw || ny < 0 || ny >= mh) continue;
+            const nIdx = (ny * mw + nx) * 4;
             maxAlpha = Math.max(maxAlpha, src[nIdx + 3]);
           }
         }
@@ -620,34 +733,36 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // reference, so mutating the old canvas in place was invisible to them.
     // Dilation can push the selection beyond the old bounds, so widen the
     // trace window to the full document.
-    const expanded = createBlankCanvas(docWidth, docHeight);
-    expanded.getContext('2d')!.putImageData(new ImageData(dst, docWidth, docHeight), 0, 0);
+    const expanded = createBlankCanvas(mw, mh);
+    expanded.getContext('2d')!.putImageData(new ImageData(dst, mw, mh), 0, 0);
     set({ selectionMask: expanded, selectionBounds: { x: 0, y: 0, w: docWidth, h: docHeight } });
   },
 
   contractSelection: (pixels) => {
     const { selectionMask, docWidth, docHeight } = get();
     if (!selectionMask || pixels <= 0) return;
-    // Erode the mask
+    // Erode the mask — read/write at the mask's own dimensions.
+    const mw = selectionMask.width;
+    const mh = selectionMask.height;
     const ctx = selectionMask.getContext('2d', { willReadFrequently: true })!;
-    const imageData = ctx.getImageData(0, 0, docWidth, docHeight);
+    const imageData = ctx.getImageData(0, 0, mw, mh);
     const src = imageData.data;
     const dst = new Uint8ClampedArray(src);
-    const r = Math.max(1, Math.round(pixels));
-    for (let y = 0; y < docHeight; y++) {
-      for (let x = 0; x < docWidth; x++) {
-        const idx = (y * docWidth + x) * 4;
+    const r = Math.max(1, Math.round(Math.min(pixels, 64)));
+    for (let y = 0; y < mh; y++) {
+      for (let x = 0; x < mw; x++) {
+        const idx = (y * mw + x) * 4;
         // Check if all neighbors within radius are selected
         let minAlpha = 255;
         for (let dy = -r; dy <= r; dy++) {
           for (let dx = -r; dx <= r; dx++) {
             if (dx * dx + dy * dy > r * r) continue;
             const nx = x + dx, ny = y + dy;
-            if (nx < 0 || nx >= docWidth || ny < 0 || ny >= docHeight) {
+            if (nx < 0 || nx >= mw || ny < 0 || ny >= mh) {
               minAlpha = 0;
               break;
             }
-            const nIdx = (ny * docWidth + nx) * 4;
+            const nIdx = (ny * mw + nx) * 4;
             minAlpha = Math.min(minAlpha, src[nIdx + 3]);
             if (minAlpha === 0) break;
           }
@@ -659,12 +774,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // Write into a fresh canvas so the reference changes (see invertSelection
     // for why in-place mutation is invisible to subscribers). Erosion only
     // shrinks the selection, so the old bounds remain a valid trace window.
-    const contracted = createBlankCanvas(docWidth, docHeight);
-    contracted.getContext('2d')!.putImageData(new ImageData(dst, docWidth, docHeight), 0, 0);
+    const contracted = createBlankCanvas(mw, mh);
+    contracted.getContext('2d')!.putImageData(new ImageData(dst, mw, mh), 0, 0);
     set({ selectionMask: contracted });
   },
 
   pushHistory: (label) => {
+    // Skip while an undo/redo restore is decoding — a stroke committed in
+    // that window would snapshot the pre-restore pixels into a terminal
+    // history entry that then gets overwritten by the restore (silent loss).
+    if (get().isRestoring) return;
     set((s) => {
       const settings = s.perfSettings;
       const maxHistory = settings.maxHistoryStates;
@@ -718,7 +837,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (s.historyIndex <= 0) return s;
       const newIndex = s.historyIndex - 1;
       const entry = s.history[newIndex];
-      restoreFromHistory(entry);
+      // Queue the restore: rapid Ctrl+Z presses each enqueue in order, so the
+      // LAST restore to complete matches the final index (previously all
+      // restores ran concurrently and whichever Image decoded last won).
+      enqueueHistoryRestore(entry);
       return { historyIndex: newIndex };
     });
   },
@@ -728,7 +850,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (s.historyIndex >= s.history.length - 1) return s;
       const newIndex = s.historyIndex + 1;
       const entry = s.history[newIndex];
-      restoreFromHistory(entry);
+      enqueueHistoryRestore(entry);
       return { historyIndex: newIndex };
     });
   },
@@ -887,16 +1009,63 @@ async function restoreFromHistory(entry: HistoryEntry) {
       maskEnabled: snap.maskEnabled,
     });
   }
+  // A stale selection mask (from before a crop/resize) has dimensions that no
+  // longer match the restored document — every selection op would throw
+  // IndexSizeError. Clear it when the document geometry changed.
+  const dimsChanged = store.docWidth !== docWidth || store.docHeight !== docHeight;
+  const staleSelection = store.selectionMask
+    && (store.selectionMask.width !== docWidth || store.selectionMask.height !== docHeight);
   useEditorStore.setState({
     layers: newLayers,
     activeLayerId: entry.activeLayerId,
     docWidth,
     docHeight,
+    ...(dimsChanged || staleSelection ? { selectionMask: null, selectionBounds: null } : {}),
   });
 }
 
+/**
+ * Queue a history restore so rapid undo/redo presses apply IN ORDER and the
+ * last completed restore always matches the final historyIndex. Previously
+ * every restore ran concurrently (fire-and-forget async) and whichever layer
+ * Image happened to decode last won, desyncing index vs. content and letting
+ * a paint committed mid-restore capture pre-restore pixels.
+ */
+let historyRestoreChain: Promise<void> = Promise.resolve();
+function enqueueHistoryRestore(entry: HistoryEntry): void {
+  useEditorStore.setState({ isRestoring: true });
+  historyRestoreChain = historyRestoreChain
+    .then(() => restoreFromHistory(entry))
+    .catch((e) => {
+      console.error('[history] restore failed:', e);
+      toast.error('Failed to restore history state');
+    })
+    .finally(() => {
+      useEditorStore.setState({ isRestoring: false });
+    });
+}
+
+/** Draw a layer onto a target context with its mask applied (if enabled). */
+function drawLayerWithMask(
+  target: CanvasRenderingContext2D,
+  layer: LayerData,
+  docWidth: number,
+  docHeight: number,
+): void {
+  if (layer.maskCanvas && layer.maskEnabled) {
+    const tmp = createBlankCanvas(docWidth, docHeight);
+    const tctx = tmp.getContext('2d')!;
+    tctx.drawImage(layer.canvas, 0, 0);
+    tctx.globalCompositeOperation = 'destination-in';
+    tctx.drawImage(layer.maskCanvas, 0, 0);
+    target.drawImage(tmp, 0, 0);
+  } else {
+    target.drawImage(layer.canvas, 0, 0);
+  }
+}
+
 function loadIntoCanvas(canvas: HTMLCanvasElement, dataUrl: string): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
       const ctx = canvas.getContext('2d')!;
@@ -904,6 +1073,10 @@ function loadIntoCanvas(canvas: HTMLCanvasElement, dataUrl: string): Promise<voi
       ctx.drawImage(img, 0, 0);
       resolve();
     };
+    // Without a rejection path, a single corrupt snapshot data URL left the
+    // restore promise pending forever — undo silently did nothing and the
+    // index stayed permanently desynced from the layer content.
+    img.onerror = () => reject(new Error('Failed to decode history snapshot'));
     img.src = dataUrl;
   });
 }
