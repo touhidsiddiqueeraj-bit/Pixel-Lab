@@ -173,6 +173,13 @@
 .editor-accent { color: var(--editor-accent); }
 .editor-accent-bg { background-color: var(--editor-accent); }
 
+/* Translucent "glass" surfaces for floating mobile UI (dock, drawer, edge
+   buttons). The editor-surface vars are opaque oklch() colors, so the
+   slash-opacity Tailwind syntax does not apply to them — color-mix bakes the
+   translucency in a single real class instead. */
+.editor-glass { background-color: color-mix(in srgb, var(--editor-surface) 92%, transparent); }
+.editor-glass-strong { background-color: color-mix(in srgb, var(--editor-surface) 96%, transparent); }
+
 /* Custom scrollbar */
 .custom-scroll::-webkit-scrollbar {
   width: 8px;

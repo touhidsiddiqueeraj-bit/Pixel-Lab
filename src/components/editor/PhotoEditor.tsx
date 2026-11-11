@@ -32,109 +32,14 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
-import { Layers, History, Palette, SlidersHorizontal, Menu, PanelRight, Spline, Compass, Sun, Brush, Image as ImageIcon, Download, Upload, Clipboard, Grid as GridIcon, Wand2, Film, Keyboard, AlignLeft, Sparkles, X, Undo2, Redo2, Lasso, MousePointer2, Square, Circle, Pipette, Pencil, Eraser, PaintBucket, Type, Hand, ZoomIn, Crop, Pen, Stamp, Bandage, Droplet, PenTool, Wind, Star, Hexagon, MoveRight, Heart, MessageCircle, RefreshCw, Scissors, Shrink, Expand, RotateCw, Minus, Triangle } from 'lucide-react';
+import { Layers, History, Palette, SlidersHorizontal, Menu, PanelRight, Spline, Compass, Sun, Download, Keyboard, Sparkles, X, Undo2, Redo2 } from 'lucide-react';
 import { ToolType } from '@/lib/editor-types';
+import { MobileToolDock, MobilePanelTarget } from './MobileUI';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 type PanelTab = 'layers' | 'adjust' | 'develop' | 'color' | 'history' | 'nav' | 'agent' | 'automations';
-
-// Mobile toolbar tool definitions. Each entry maps a tool type to an icon
-// (Lucide) and a short label. Tools are grouped into categories so the mobile
-// toolbar can render a horizontal category strip and a horizontal tool strip.
-//
-// IMPORTANT: All three lasso variants (lasso, polygonal-lasso, magnetic-lasso)
-// are present as separate, clearly-labelled buttons. The previous mobile
-// toolbar only had a single "lasso" button which selected the regular lasso —
-// users had no way to access the polygonal or magnetic variants from mobile,
-// and the single button's behaviour overlapped confusingly with the desktop
-// toolbar's three-button lasso group.
-interface MobileToolDef {
-  type: ToolType;
-  icon: React.ReactNode;
-  label: string;
-}
-
-const MOBILE_TOOL_GROUPS: { category: string; icon: React.ReactNode; tools: MobileToolDef[] }[] = [
-  {
-    category: 'Select',
-    icon: <MousePointer2 size={16} />,
-    tools: [
-      { type: 'move', icon: <MousePointer2 size={20} />, label: 'Move' },
-      { type: 'marquee-rect', icon: <Square size={20} />, label: 'Rect' },
-      { type: 'marquee-ellipse', icon: <Circle size={20} />, label: 'Ellipse' },
-      { type: 'lasso', icon: <Lasso size={20} />, label: 'Lasso' },
-      { type: 'polygonal-lasso', icon: <Spline size={20} />, label: 'Poly' },
-      { type: 'magnetic-lasso', icon: <PenTool size={20} />, label: 'Magnet' },
-      { type: 'magic-wand', icon: <Wand2 size={20} />, label: 'Wand' },
-      { type: 'crop', icon: <Crop size={20} />, label: 'Crop' },
-    ],
-  },
-  {
-    category: 'Paint',
-    icon: <Brush size={16} />,
-    tools: [
-      { type: 'brush', icon: <Brush size={20} />, label: 'Brush' },
-      { type: 'pencil', icon: <Pencil size={20} />, label: 'Pencil' },
-      { type: 'eraser', icon: <Eraser size={20} />, label: 'Erase' },
-      { type: 'bucket', icon: <PaintBucket size={20} />, label: 'Fill' },
-      { type: 'gradient', icon: <Palette size={20} />, label: 'Grad' },
-      { type: 'eyedropper', icon: <Pipette size={20} />, label: 'Pick' },
-      { type: 'clone-stamp', icon: <Stamp size={20} />, label: 'Clone' },
-      { type: 'heal-brush', icon: <Bandage size={20} />, label: 'Heal' },
-      { type: 'blob-brush', icon: <Droplet size={20} />, label: 'Blob' },
-      { type: 'smooth-tool', icon: <Sparkles size={20} />, label: 'Smooth' },
-    ],
-  },
-  {
-    category: 'Shapes',
-    icon: <Square size={16} />,
-    tools: [
-      { type: 'shape-rect', icon: <Square size={20} />, label: 'Rect' },
-      { type: 'shape-ellipse', icon: <Circle size={20} />, label: 'Ellipse' },
-      { type: 'shape-line', icon: <Minus size={20} />, label: 'Line' },
-      { type: 'shape-star', icon: <Star size={20} />, label: 'Star' },
-      { type: 'shape-polygon', icon: <Hexagon size={20} />, label: 'Poly' },
-      { type: 'shape-arrow', icon: <MoveRight size={20} />, label: 'Arrow' },
-      { type: 'shape-heart', icon: <Heart size={20} />, label: 'Heart' },
-      { type: 'shape-speech-bubble', icon: <MessageCircle size={20} />, label: 'Bubble' },
-      { type: 'shape-spiral', icon: <RefreshCw size={20} />, label: 'Spiral' },
-      { type: 'text', icon: <Type size={20} />, label: 'Text' },
-    ],
-  },
-  {
-    category: 'Pen',
-    icon: <Pen size={16} />,
-    tools: [
-      { type: 'pen', icon: <Pen size={20} />, label: 'Pen' },
-      { type: 'curvature-pen', icon: <Spline size={20} />, label: 'Curve' },
-      { type: 'calligraphy-brush', icon: <PenTool size={20} />, label: 'Calig' },
-      { type: 'scatter-brush', icon: <Scissors size={20} />, label: 'Scatter' },
-    ],
-  },
-  {
-    category: 'Liquify',
-    icon: <Wind size={16} />,
-    tools: [
-      { type: 'liquify-push', icon: <Wind size={20} />, label: 'Push' },
-      { type: 'liquify-pucker', icon: <Shrink size={20} />, label: 'Pucker' },
-      { type: 'liquify-bloat', icon: <Expand size={20} />, label: 'Bloat' },
-      { type: 'liquify-twirl', icon: <RotateCw size={20} />, label: 'Twirl' },
-    ],
-  },
-  {
-    category: 'View',
-    icon: <Hand size={16} />,
-    tools: [
-      { type: 'hand', icon: <Hand size={20} />, label: 'Pan' },
-      { type: 'zoom', icon: <ZoomIn size={20} />, label: 'Zoom' },
-    ],
-  },
-];
-
-// Flatten for quick lookups
-const ALL_MOBILE_TOOLS: MobileToolDef[] = MOBILE_TOOL_GROUPS.flatMap(g => g.tools);
 
 export function PhotoEditor() {
   const [newDocOpen, setNewDocOpen] = useState(false);
@@ -144,11 +49,6 @@ export function PhotoEditor() {
   const [activeTab, setActiveTab] = useState<PanelTab>('layers');
   const [isMobile, setIsMobile] = useState(false);
   const [menuSheetOpen, setMenuSheetOpen] = useState(false);
-  // Mobile: which tool category is currently shown in the bottom toolbar.
-  // Defaults to 'Select' so the lasso variants are immediately visible — this
-  // is the category users were complaining about (the old mobile toolbar only
-  // exposed the regular lasso).
-  const [mobileCategory, setMobileCategory] = useState<string>('Select');
   const [agentSheetOpen, setAgentSheetOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
@@ -176,15 +76,19 @@ export function PhotoEditor() {
   // Detect mobile viewport — apply the default panel state only when the
   // breakpoint is CROSSED, not on every resize event (mobile URL-bar
   // show/hide fires resize; re-applying the default destroyed the user's
-  // explicit panel toggle every time).
+  // explicit panel toggle every time). The FIRST measurement on a phone
+  // (initial load) also closes the panels: a minimal phone layout should
+  // land on a clean canvas, not with the panels sheet already open.
   useEffect(() => {
     let wasMobile: boolean | null = null;
     const check = () => {
+      const first = wasMobile === null;
       const mobile = window.innerWidth < 768;
-      const crossed = wasMobile !== null && mobile !== wasMobile;
+      const crossed = !first && mobile !== wasMobile;
       wasMobile = mobile;
       setIsMobile(mobile);
       if (crossed) setPanelOpen(!mobile);
+      else if (first && mobile) setPanelOpen(false);
     };
     check();
     window.addEventListener('resize', check);
@@ -324,29 +228,32 @@ export function PhotoEditor() {
       className="h-full flex flex-col"
     >
       <TabsList className="editor-surface editor-border rounded-none w-full justify-start h-9 p-0 border-b overflow-x-auto custom-scroll">
+        {/* Labels always visible (even below sm): on the mobile panels sheet
+            icon-only tabs were cryptic. The strip scrolls horizontally, so
+            narrow screens still reach every tab. */}
         <TabsTrigger value="layers" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
-          <Layers size={12} /> <span className="hidden sm:inline">Layers</span>
+          <Layers size={12} /> <span>Layers</span>
         </TabsTrigger>
         <TabsTrigger value="adjust" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
-          <SlidersHorizontal size={12} /> <span className="hidden sm:inline">Adjust</span>
+          <SlidersHorizontal size={12} /> <span>Adjust</span>
         </TabsTrigger>
         <TabsTrigger value="develop" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
-          <Sun size={12} /> <span className="hidden sm:inline">Develop</span>
+          <Sun size={12} /> <span>Develop</span>
         </TabsTrigger>
         <TabsTrigger value="color" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
-          <Palette size={12} /> <span className="hidden sm:inline">Color</span>
+          <Palette size={12} /> <span>Color</span>
         </TabsTrigger>
         <TabsTrigger value="nav" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
-          <Compass size={12} /> <span className="hidden sm:inline">Nav</span>
+          <Compass size={12} /> <span>Nav</span>
         </TabsTrigger>
         <TabsTrigger value="history" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
-          <History size={12} /> <span className="hidden sm:inline">History</span>
+          <History size={12} /> <span>History</span>
         </TabsTrigger>
         <TabsTrigger value="agent" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
-          <Sparkles size={12} className="text-sky-400" /> <span className="hidden sm:inline">Luna</span>
+          <Sparkles size={12} className="text-sky-400" /> <span>Luna</span>
         </TabsTrigger>
         <TabsTrigger value="automations" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
-          <Layers size={12} className="text-amber-400" /> <span className="hidden sm:inline">Recipes</span>
+          <Layers size={12} className="text-amber-400" /> <span>Recipes</span>
         </TabsTrigger>
       </TabsList>
       <TabsContent value="layers" className="flex-1 min-h-0 m-0">
@@ -606,20 +513,43 @@ export function PhotoEditor() {
         </div>
       </div>
 
-      {/* Desktop: menu bar inline */}
+      {/* Desktop: menu bar inline. Mobile keeps the compact top bar — the
+          hamburger menu sheet carries the full MenuBar. */}
       {!isMobile && (
         <MenuBar onOpenNewDoc={() => setNewDocOpen(true)} onOpenFigmaImport={() => setFigmaImportOpen(true)} />
       )}
-      <OptionsBar />
+      {/* Desktop: contextual tool options strip. Mobile hides it entirely —
+          the MobileToolDock's options drawer carries the same controls in a
+          thumb-friendly vertical layout, and hiding this strip returns the
+          whole screen width/height budget to the canvas. */}
+      {!isMobile && <OptionsBar />}
 
       <div className="flex flex-1 min-h-0 flex-col">
         <div className="flex flex-1 min-h-0">
           {/* Desktop: full toolbar */}
           {!isMobile && <Toolbar />}
 
-          <div className="flex-1 flex min-w-0">
-            {/* Canvas area */}
+          {/* Canvas area. On mobile, reserve a bottom padding lane where the
+              floating tool dock lives — EditorCanvas's own zoom cluster and
+              status bar sit at ITS container bottom, which now ends above the
+              dock, so nothing overlaps and no EditorCanvas changes needed. */}
+          <div className={cn(
+            'flex-1 flex min-w-0 relative',
+            isMobile && 'pb-[72px]',
+          )}>
             <EditorCanvas />
+
+            {/* Mobile: floating minimal dock (common tools, options drawer,
+                more-tools sheet) + edge buttons (Layers / Adjust / Luna). */}
+            {isMobile && (
+              <MobileToolDock
+                onOpenPanel={(tab: MobilePanelTarget) => {
+                  setActiveTab(tab);
+                  setPanelOpen(true);
+                }}
+                onOpenAgent={() => setAgentSheetOpen(true)}
+              />
+            )}
 
             {/* Desktop: right panels */}
             {!isMobile && panelOpen && (
@@ -628,10 +558,12 @@ export function PhotoEditor() {
               </div>
             )}
 
-            {/* Mobile: panels in a bottom sheet */}
+            {/* Mobile: panels in a side sheet — opened from the floating edge
+                buttons or the drawer. Width covers most of the screen so panel
+                controls get real estate without going full-screen. */}
             {isMobile && (
               <Sheet open={panelOpen} onOpenChange={setPanelOpen}>
-                <SheetContent side="right" className="editor-surface editor-text border-l editor-border w-[300px] p-0">
+                <SheetContent side="right" className="editor-surface editor-text border-l editor-border w-[86vw] max-w-[340px] p-0">
                   <SheetHeader className="p-3 border-b editor-border">
                     <SheetTitle className="editor-text">Panels</SheetTitle>
                   </SheetHeader>
@@ -643,28 +575,11 @@ export function PhotoEditor() {
             )}
           </div>
         </div>
-
-        {/* Mobile: bottom toolbar with categories + tools + colors. The
-            toolbar's right end has buttons for Panels and Luna (AI) so we
-            no longer need separate floating buttons that overlapped each
-            other and the canvas zoom controls. */}
-        {isMobile && (
-          <MobileToolbar
-            activeCategory={mobileCategory}
-            onCategoryChange={setMobileCategory}
-            onOpenPanels={() => setPanelOpen(true)}
-            onOpenAgent={() => setAgentSheetOpen(true)}
-          />
-        )}
       </div>
 
-      {/* Mobile: no more floating panels button — it's now in the bottom
-          toolbar (right end) to avoid overlapping the canvas zoom controls
-          and the Luna bubble. */}
-
       {/* Luna (AI agent) floating bubble — bottom-right on desktop only.
-          On mobile, the Luna button is integrated into the bottom toolbar
-          so it doesn't overlap with anything.
+          On mobile, the Luna button lives in the floating edge stack next to
+          Layers/Adjust so it doesn't overlap the tool dock.
           Shows a pulse when no API key is set, a spinner when running, and a
           badge dot when a preview is awaiting Accept/Reject. */}
       {!isMobile && (
@@ -733,183 +648,6 @@ export function PhotoEditor() {
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <Onboarding />
       <TutorialPanel />
-    </div>
-  );
-}
-
-// Mobile toolbar — redesigned from scratch.
-//
-// Problems with the old design:
-//   1. Only a single "lasso" button → users couldn't access the polygonal or
-//      magnetic lasso variants from mobile, and the single button's behaviour
-//      "overlapped" with the desktop toolbar's three-button lasso group.
-//   2. Buttons were 12×12 (48px) which is borderline for thumb use, and the
-//      labels were 8px — barely legible.
-//   3. The toolbar used a "collapsed/expanded" toggle that swapped between a
-//      short list and a long flat list — confusing because tools changed
-//      position when expanding.
-//   4. Floating panels + Luna buttons stacked at bottom-right collided with
-//      the canvas zoom controls and each other.
-//
-// New design:
-//   • Two-row bottom toolbar.
-//   • Row 1: horizontal scrollable category strip (Select / Paint / Shapes /
-//     Pen / Liquify / View) + sticky right-end with Panels and Luna buttons.
-//   • Row 2: horizontal scrollable tool buttons for the active category, with
-//     large 56×48px touch targets and readable labels. All three lasso
-//     variants appear as distinct buttons under the "Select" category.
-//   • Color swatches live in the OptionsBar area on mobile (they were
-//     already there in the desktop Toolbar; we now expose them on mobile too
-//     via a compact color row at the left of the tool row).
-function MobileToolbar({
-  activeCategory,
-  onCategoryChange,
-  onOpenPanels,
-  onOpenAgent,
-}: {
-  activeCategory: string;
-  onCategoryChange: (cat: string) => void;
-  onOpenPanels: () => void;
-  onOpenAgent: () => void;
-}) {
-  const activeTool = useEditorStore((s) => s.activeTool);
-  const setTool = useEditorStore((s) => s.setTool);
-  const foreground = useEditorStore((s) => s.foregroundColor);
-  const background = useEditorStore((s) => s.backgroundColor);
-  const swapColors = useEditorStore((s) => s.swapColors);
-  const agentApiKey = useAgentStore((s) => s.apiKey);
-  const agentStatus = useAgentStore((s) => s.status);
-
-  const activeGroup = MOBILE_TOOL_GROUPS.find(g => g.category === activeCategory) ?? MOBILE_TOOL_GROUPS[0];
-
-  return (
-    <div className="shrink-0 editor-surface border-t editor-border no-select">
-      {/* Row 1: category strip + sticky right-end actions (panels, Luna).
-          Categories scroll horizontally; the right-end buttons are sticky
-          so they're always reachable. */}
-      <div className="flex items-stretch border-b editor-border">
-        <div className="flex items-center gap-1 px-2 py-1.5 overflow-x-auto custom-scroll flex-1 min-w-0">
-          {MOBILE_TOOL_GROUPS.map((group) => {
-            // A category is "active" if it's the selected category OR if the
-            // currently-active tool belongs to it. This keeps the category
-            // highlighted when the user picks a tool then switches category
-            // and back.
-            const isActive = group.category === activeCategory
-              || group.tools.some(t => t.type === activeTool);
-            return (
-              <button
-                key={group.category}
-                onClick={() => onCategoryChange(group.category)}
-                className={cn(
-                  'flex items-center gap-1.5 px-3 h-9 rounded-md transition-colors shrink-0 text-xs font-medium',
-                  isActive
-                    ? 'editor-accent-bg text-white'
-                    : 'editor-text-muted hover:editor-surface-3',
-                )}
-              >
-                {group.icon}
-                <span>{group.category}</span>
-              </button>
-            );
-          })}
-        </div>
-        {/* Sticky right-end: Panels + Luna buttons. These are part of the
-            toolbar (not floating) so they can't overlap the canvas zoom
-            controls or each other. */}
-        <div className="flex items-center gap-1 px-2 border-l editor-border shrink-0">
-          <button
-            onClick={onOpenPanels}
-            className="flex items-center justify-center h-9 w-9 rounded-md editor-text-muted hover:editor-surface-3 shrink-0"
-            title="Open Panels"
-            aria-label="Open Panels"
-          >
-            <PanelRight size={18} />
-          </button>
-          <button
-            onClick={onOpenAgent}
-            className={cn(
-              'relative flex items-center justify-center h-9 w-9 rounded-md shrink-0 text-white',
-              'bg-gradient-to-br from-sky-500 to-purple-600 hover:from-sky-400 hover:to-purple-500',
-              !agentApiKey && 'animate-pulse',
-            )}
-            title="Open Luna (AI Agent)"
-            aria-label="Open Luna"
-          >
-            {agentStatus === 'running' ? (
-              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            ) : (
-              <Sparkles size={18} />
-            )}
-            {agentStatus === 'awaiting-accept' && (
-              <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 border-2 border-white" />
-            )}
-            {agentStatus === 'error' && (
-              <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-red-500 border-2 border-white" />
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* Row 2: color swatches (left, sticky) + tool buttons (scrollable). */}
-      <div className="flex items-stretch">
-        {/* Color swatches — sticky on the left so they're always visible
-            regardless of which category is selected. The swatches are 32×32
-            (just above the 44px touch-target minimum when combined with
-            padding) and the swap arrow is a separate button. */}
-        <div className="flex items-center gap-1.5 px-2 border-r editor-border shrink-0">
-          <button
-            onClick={() => document.getElementById('fg-color-input')?.click()}
-            className="w-8 h-8 rounded-md border-2 border-white/70 shadow shrink-0"
-            style={{ backgroundColor: foreground }}
-            title="Foreground color"
-            aria-label="Foreground color"
-          />
-          <button
-            onClick={swapColors}
-            className="flex items-center justify-center w-7 h-7 rounded editor-text-dim hover:editor-text hover:editor-surface-3 shrink-0"
-            title="Swap colors"
-            aria-label="Swap colors"
-          >
-            <Triangle size={10} className="rotate-90 fill-current" />
-          </button>
-          <button
-            onClick={() => document.getElementById('bg-color-input')?.click()}
-            className="w-8 h-8 rounded-md border-2 border-white/70 shadow shrink-0"
-            style={{ backgroundColor: background }}
-            title="Background color"
-            aria-label="Background color"
-          />
-        </div>
-
-        {/* Tool buttons — horizontally scrollable. Each button is 56×48px
-            (well above the 44px touch target minimum) with a 10px label. */}
-        <div className="flex items-center gap-1 px-2 py-1.5 overflow-x-auto custom-scroll flex-1 min-w-0">
-          {activeGroup.tools.map((tool) => {
-            const isActive = activeTool === tool.type;
-            return (
-              <button
-                key={tool.type}
-                onClick={() => setTool(tool.type)}
-                className={cn(
-                  'flex flex-col items-center justify-center gap-0.5 w-14 h-12 rounded-lg transition-colors shrink-0',
-                  isActive
-                    ? 'editor-accent-bg text-white shadow-inner'
-                    : 'editor-text-muted hover:editor-surface-3 hover:editor-text',
-                )}
-                title={tool.label}
-                aria-label={tool.label}
-                aria-pressed={isActive}
-              >
-                {tool.icon}
-                <span className="text-[10px] leading-none font-medium">{tool.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
     </div>
   );
 }
