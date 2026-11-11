@@ -43,6 +43,12 @@
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
   - [Build for Production](#build-for-production)
+- [Android App (APK)](#android-app-apk)
+  - [Install from a Release](#install-from-a-release)
+  - [Build the APK Yourself](#build-the-apk-yourself)
+  - [Signing](#signing)
+- [CI/CD Pipeline](#cicd-pipeline)
+  - [Cutting a Release](#cutting-a-release)
 - [Usage](#usage)
   - [Keyboard Shortcuts](#keyboard-shortcuts)
   - [Quick Start Guide](#quick-start-guide)
@@ -216,7 +222,7 @@ See [SECURITY_NOTES.md](SECURITY_NOTES.md) for honest disclosure of the API key 
 - **24 Document Templates**: Social media, Print, Digital, Mobile, Icons
 
 ### 📱 Responsive & Themeable
-- **Mobile bottom toolbar** — 10 quick tools + expandable to 20+, color swatches
+- **Minimalistic mobile UI** — canvas-first layout with a floating tool dock: one-tap access to the most common tools (brush, eraser, fill, eyedropper, marquee, move), expandable "More tools" sheet with grouped categories, bottom-sheet panels (Layers, Adjust, Color, History, Luna, …), foreground/background color chips, and 44px+ touch targets throughout
 - **Canvas zoom controls** — Fit, 1:1, +, − buttons on canvas
 - **Auto-fit zoom** — Re-fits on viewport resize/rotation
 - **Auto light/dark mode** — Detects OS preference via `next-themes`
@@ -302,6 +308,65 @@ bun run start
 The app is a standard Next.js application with `output: "standalone"` and can be deployed to Vercel, Netlify, or any Node.js host. All image processing is 100% client-side — no server-side processing required.
 
 > **Note for self-hosting**: If you deploy behind a reverse proxy (e.g. Caddy, nginx), a sample `Caddyfile` is included in the repo.
+
+---
+
+## Android App (APK)
+
+Pixel Lab ships as a native Android app. The full editor (static export of the web app) is bundled **inside** the APK via [Capacitor 7](https://capacitorjs.com) — no internet connection needed to edit, no server, no telemetry. Requires Android 6.0+ (API 23).
+
+Because Luna talks to Google's Gemini API directly from the client, **everything works in the APK exactly as on the web**, including the AI assistant (just needs internet + your own Gemini API key).
+
+### Install from a Release
+
+1. Open the [Releases](https://github.com/touhidsiddiqueeraj-bit/Pixel-Lab/releases) page and grab `PixelLab-vX.Y.Z.apk` from the latest release.
+2. Open the file on your Android device. When prompted, allow your browser/file manager to "install unknown apps".
+3. Install and launch **Pixel Lab** from the app drawer.
+
+Each release body includes the APK's SHA-256 checksum so you can verify the download.
+
+### Build the APK Yourself
+
+Prerequisites: Node.js 18+, JDK 21, Android SDK with platform 35 + build-tools 35 (`ANDROID_HOME` set).
+
+```bash
+npm install
+npm run build:apk          # static export of the web app -> out/
+npx cap sync android       # copies out/ into the Android shell
+
+cd android
+./gradlew assembleDebug    # debug APK  -> app/build/outputs/apk/debug/
+./gradlew assembleRelease  # signed release APK -> app/build/outputs/apk/release/
+```
+
+`BUILD_TARGET=apk` (set by the `build:apk` script) switches Next.js to `output: "export"`; the normal `npm run build` is unaffected.
+
+### Signing
+
+The committed `android/keystore.p12` (PKCS12, alias `pixel-lab`, password `PixelLabRel2025`) is a **demo keystore** used to sign release APKs so they can be installed and upgraded consistently. It is intentionally public for this project.
+
+For a real Play Store build, replace it: generate your own keystore and pass `APK_STORE_PASSWORD`, `APK_KEY_ALIAS` and `APK_KEY_PASSWORD` as environment variables (see `android/app/build.gradle`). APKs signed with a different key cannot upgrade existing installs.
+
+---
+
+## CI/CD Pipeline
+
+Two GitHub Actions workflows keep the repo green and ship the APK:
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| **CI** (`.github/workflows/ci.yml`) | push to `main`, PRs targeting `main` | `tsc --noEmit` typecheck, `eslint src/`, production web build |
+| **Release APK** (`.github/workflows/release.yml`) | pushing a `v*` tag | static export → `cap sync` → stamps `versionName` from the tag & `versionCode` from the CI run number → Gradle `assembleRelease` (JDK 21) → publishes a GitHub Release with the signed APK + SHA-256 + install notes |
+
+### Cutting a Release
+
+```bash
+# After merging to main, tag and push:
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+The Release APK workflow runs automatically and attaches `PixelLab-v1.0.1.apk` to a new GitHub Release. `versionCode` is the CI run number, so every build is monotonically newer and installable as an upgrade over any previous release.
 
 ---
 
@@ -419,6 +484,7 @@ The **Agent** tab in the right panel lets you describe edits in plain English an
 | Layer | Technology |
 |---|---|
 | **Framework** | Next.js 16 with App Router + Turbopack |
+| **Android Shell** | Capacitor 7 — WebView wrapping a static export (`BUILD_TARGET=apk`) |
 | **Language** | TypeScript 5 |
 | **Styling** | Tailwind CSS 4 with shadcn/ui primitives |
 | **State Management** | Zustand 5 |
@@ -438,6 +504,8 @@ The **Agent** tab in the right panel lets you describe edits in plain English an
 
 ```
 pixel-lab/
+├── capacitor.config.ts        # Capacitor shell config (appId, webDir=out) for the Android build
+├── android/                   # Native Android project (Gradle, keystore, release signing)
 ├── src/
 │   ├── app/                    # Next.js app router
 │   │   ├── layout.tsx          # Root layout with ThemeProvider
@@ -484,7 +552,9 @@ pixel-lab/
 │   ├── pixel-lab-logo.svg      # Logo
 │   └── screenshots/            # App screenshots
 ├── examples/                   # Example code (e.g. websocket server)
-├── .github/                    # GitHub templates (issues, PR, code of conduct, dependabot)
+├── .github/
+│   ├── workflows/             # CI (typecheck/lint/build) + Release APK (tag-driven)
+│   └── ...                    # GitHub templates (issues, PR, code of conduct, dependabot)
 ├── ARCHITECTURE.md             # System architecture (deep dive)
 ├── EXTENSIONS.md               # How to create extensions, connect external AI agents via MCP
 ├── CONTRIBUTING.md             # Contribution guide
@@ -512,8 +582,9 @@ pixel-lab/
 
 ### Recently shipped ✅
 
+- **🆕 Android APK releases** — Capacitor 7 shell around a static export; signed APKs published automatically to GitHub Releases via the tag-driven CI/CD pipeline (release notes + SHA-256 included)
+- **🆕 Minimalistic mobile UI redesign** — canvas-first layout with a floating tool dock (one-tap common tools, "More tools" sheet, bottom-sheet panels, 44px+ touch targets)
 - **🆕 Magnetic Lasso fixed** — proper BT.601 luminance + lowered Sobel threshold for reliable edge snapping; click-to-add manual anchors; double-click / Enter to close; pulsing start-anchor + snapped-point visual feedback; per-move `setSelection` allocation removed (no more UI freeze on large docs)
-- **🆕 Mobile layout redesigned from scratch** — 2-row bottom toolbar (category strip + tool strip) with all 3 lasso variants as distinct buttons, sticky color swatches, integrated Panels + Luna buttons (no more floating overlap), 44px+ touch targets throughout
 - **🆕 Luna vision self-evaluation** — after tool calls, a vision model reviews BEFORE/AFTER and scores the edit 1–10. Scores <7 trigger automatic retry with feedback (up to 2 retries). Bad edits are caught before you see them.
 - **🆕 Luna preference memory** — Accept/Reject decisions are recorded to `localStorage` and summarized into the system prompt on subsequent runs. Luna adapts to your taste over time.
 - **🆕 Lasso overlay** — marching-squares contour trace replaces bounding-box `strokeRect` for lasso, polygonal lasso, magnetic lasso, and magic wand selection paths

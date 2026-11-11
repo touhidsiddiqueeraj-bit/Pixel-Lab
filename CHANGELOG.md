@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 🚀 CI/CD & Distribution
+
+#### Android APK releases (Capacitor 7)
+- The web editor is now packaged as a native Android app: `BUILD_TARGET=apk` switches Next.js to a fully-static export (`out/`), which `npx cap sync android` copies into a Capacitor WebView shell (`android/`, appId `com.pixellab.editor`, minSdk 23).
+- Tag-driven workflow (`.github/workflows/release.yml`): pushes of `v*` tags build the export, stamp `versionName` from the tag and `versionCode` from the CI run number, run Gradle `assembleRelease` on JDK 21 with a committed PKCS12 keystore, and publish a GitHub Release with `PixelLab-<tag>.apk` + SHA-256 + install notes.
+- The committed `android/keystore.p12` (alias `pixel-lab`) is an intentionally public demo keystore so releases are consistently signed and upgrade-installable; production builds can override via `APK_STORE_PASSWORD` / `APK_KEY_ALIAS` / `APK_KEY_PASSWORD`.
+
+#### CI workflow (`.github/workflows/ci.yml`)
+- Pushes to `main` and PRs now gate on `tsc --noEmit` (zero errors), `eslint src/` (zero problems) and a production web build.
+
+### 🐛 Fixed
+
+#### TypeScript baseline errors (CI type gate could not pass)
+- `vectorize.ts`: `ImageData.data` (typed `ImageDataArray` in newer DOM libs) was passed to/assigned from `Uint8Array`-typed pipeline helpers — now copied once into a plain `Uint8Array` at the entry point.
+- `src/hooks/use-toast.ts` and `src/hooks/use-mobile.ts` deleted — dead shadcn-template code referencing a non-existent component (the app uses Sonner) with zero consumers.
+- `examples/` excluded from `tsconfig` (standalone demos with their own uninstalled `socket.io` dependencies, not part of the build).
+
+#### React Hooks lint errors (`eslint-config-next` 16 rule `react-hooks/set-state-in-effect`)
+- Intentional synchronous mount-time initializations are now documented and disabled per-line (`PerformanceControls.tsx` device-tier detection, `TutorialPanel.tsx` step-completion tracking, `VectorizeDialog.tsx` result reset on close); two stale disable directives removed (`NavigatorPanel.tsx`, `TutorialPanel.tsx`).
+
 ### 🔒 Security
 
 #### MCP WebSocket bridge was reachable by any website and the whole LAN (`mcp/server.ts`)

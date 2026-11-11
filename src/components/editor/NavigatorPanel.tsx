@@ -90,7 +90,6 @@ export function NavigatorPanel() {
       }
       ctx.restore();
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTick((t) => t + 1);
   }, [layers, docWidth, docHeight]);
 

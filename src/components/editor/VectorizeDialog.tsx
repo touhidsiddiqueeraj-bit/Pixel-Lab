@@ -126,6 +126,9 @@ export function VectorizeDialog({ open, onClose }: VectorizeDialogProps) {
   // Reset when dialog closes
   useEffect(() => {
     if (!open) {
+      // Intentional synchronous reset: clearing the heavy vectorization
+      // result immediately frees memory as soon as the dialog closes.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setResult(null);
     }
   }, [open]);

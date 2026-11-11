@@ -159,7 +159,6 @@ export function TutorialPanel() {
     // Reset completion flag when step changes
     if (lastStepRef.current !== tutorialStep) {
       stepCompletedRef.current = false;
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setStepCompleted(false);
       lastStepRef.current = tutorialStep;
     }
@@ -168,6 +167,9 @@ export function TutorialPanel() {
     if (!stepCompletedRef.current && currentStep) {
       const state = useEditorStore.getState();
       if (currentStep.check(state)) {
+        // Intentional synchronous state update: completion must be recorded
+        // before the auto-advance timer below runs.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         stepCompletedRef.current = true; setStepCompleted(true);
         // Auto-advance after a short delay (except for the last step)
         if (!isLastStep) {

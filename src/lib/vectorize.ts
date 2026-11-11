@@ -362,7 +362,9 @@ export function vectorizeImage(
   workCtx.imageSmoothingQuality = 'high';
   workCtx.drawImage(sourceCanvas, 0, 0, workW, workH);
 
-  let pixels = workCtx.getImageData(0, 0, workW, workH).data;
+  // Copy into a plain Uint8Array so the pipeline helpers (typed Uint8Array)
+  // accept it regardless of the DOM ImageDataArray typing across TS versions.
+  let pixels: Uint8Array = new Uint8Array(workCtx.getImageData(0, 0, workW, workH).data);
 
   // Pre-blur for cleaner edges
   if (blurRadius > 0) {

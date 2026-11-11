@@ -24,6 +24,9 @@ export function PerformanceControls() {
 
   // Detect device tier on mount
   useEffect(() => {
+    // Device capabilities are only known after mount (SSR can't detect them),
+    // so this synchronous initialization is intentional.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTier(detectPerfTier());
     setCores(String(navigator.hardwareConcurrency || '?'));
     perf.enable();
