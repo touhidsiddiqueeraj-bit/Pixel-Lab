@@ -22,6 +22,9 @@
 
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <item name="android:background">@drawable/splash</item>
+        <!-- Solid color instead of @drawable/splash: the old Capacitor default
+             splash bitmap stayed the window background forever and its logo
+             bled into the edge-to-edge inset strip above the app UI. -->
+        <item name="android:background">@color/app_window_background</item>
     </style>
 </resources>

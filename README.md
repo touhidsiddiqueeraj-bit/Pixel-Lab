@@ -222,7 +222,7 @@ See [SECURITY_NOTES.md](SECURITY_NOTES.md) for honest disclosure of the API key 
 - **24 Document Templates**: Social media, Print, Digital, Mobile, Icons
 
 ### 📱 Responsive & Themeable
-- **Minimalistic mobile UI** — canvas-first layout with a floating tool dock: one-tap access to the most common tools (brush, eraser, fill, eyedropper, marquee, move), expandable "More tools" sheet with grouped categories, bottom-sheet panels (Layers, Adjust, Color, History, Luna, …), foreground/background color chips, and 44px+ touch targets throughout
+- **Minimalistic mobile UI** — canvas-first layout: a compact header (menu, doc name, undo/redo, export), a **horizontal command bar** toggled from ☰ (category chips → one-tap actions: file ops, transforms, layer ops, filters, enhance, vectorize, theme), a floating tool dock with one-tap common tools and a "More tools" sheet, bottom-sheet panels, and 44px+ touch targets throughout
 - **Canvas zoom controls** — Fit, 1:1, +, − buttons on canvas
 - **Auto-fit zoom** — Re-fits on viewport resize/rotation
 - **Auto light/dark mode** — Detects OS preference via `next-themes`
@@ -582,6 +582,7 @@ pixel-lab/
 
 ### Recently shipped ✅
 
+- **🆕 Mobile command bar + squashed-top-bar fix** — the broken slide-out menu (empty panel, its desktop dropdowns never opened on touch) is now a compact horizontal chip bar under the header; the phantom bars above the mobile header on Android (stale desktop first-paint + Capacitor splash leaking into the inset strip) are fixed via client-only mount and a solid launch background
 - **🆕 Android APK releases** — Capacitor 7 shell around a static export; signed APKs published automatically to GitHub Releases via the tag-driven CI/CD pipeline (release notes + SHA-256 included)
 - **🆕 Minimalistic mobile UI redesign** — canvas-first layout with a floating tool dock (one-tap common tools, "More tools" sheet, bottom-sheet panels, 44px+ touch targets)
 - **🆕 Magnetic Lasso fixed** — proper BT.601 luminance + lowered Sobel threshold for reliable edge snapping; click-to-add manual anchors; double-click / Enter to close; pulsing start-anchor + snapped-point visual feedback; per-move `setSelection` allocation removed (no more UI freeze on large docs)

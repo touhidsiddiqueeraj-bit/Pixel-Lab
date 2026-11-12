@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 📱 Mobile UI
+
+#### Compact horizontal command bar replaces the broken menu sheet
+- The slide-out menu sheet embedded the desktop Radix Menubar, whose dropdowns never open on touch — users got an empty panel behind a dimming scrim with an ugly scrolling tab strip. It is replaced by a **floating horizontal chip bar** docked under the title bar: category chips (File / Image / Layer / Filter / Enhance / Vector / View) expand in place into one-tap action chips, the canvas stays interactive (no scrim), the scrollbar is hidden, and the bar auto-closes after an action.
+- Actions run with sensible defaults — no `prompt()` chains on a phone (Blur = 5px, Sharpen = 1.0, Pixelate = 8, Vignette = 50/50, Posterize = 4, BG removal tolerance = 30). Resize still asks for width/height.
+- Header decluttered from 7 items to 5 (menu, doc name, undo, redo, export); the theme toggle moved into the View group of the command bar.
+
+#### "Squashed bars" artifact above the mobile header (Android WebView)
+- Root-cause chain: the static export prerendered the **desktop** layout (`isMobile` initialized `false`), so the WebView's first paint was desktop chrome; the edge-to-edge inset strip above the app then showed the window background — which was still the Capacitor default **splash bitmap**, its logo squashed into the strip next to remnants of that first frame.
+- Fixes: PhotoEditor now mounts **client-only** (`ssr: false`) so the first paint on any device is the correct layout; `isMobile` initializes from the real viewport on first client render; the Android launch theme background is a solid theme-matched color instead of the Capacitor splash bitmap.
+
 ### 🚀 CI/CD & Distribution
 
 #### Android APK releases (Capacitor 7)

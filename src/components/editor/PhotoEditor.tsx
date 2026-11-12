@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { MenuBar } from './MenuBar';
+import { MobileMenuBar } from './MobileMenuBar';
 import { Toolbar } from './Toolbar';
 import { OptionsBar } from './OptionsBar';
 import { EditorCanvas } from './EditorCanvas';
@@ -47,8 +48,10 @@ export function PhotoEditor() {
   const [figmaImportOpen, setFigmaImportOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
   const [activeTab, setActiveTab] = useState<PanelTab>('layers');
-  const [isMobile, setIsMobile] = useState(false);
-  const [menuSheetOpen, setMenuSheetOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < 768,
+  );
+  const [menuBarOpen, setMenuBarOpen] = useState(false);
   const [agentSheetOpen, setAgentSheetOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
@@ -73,7 +76,13 @@ export function PhotoEditor() {
   // clients (Claude Desktop, etc.) can call Pixel Lab's tools. Auto-reconnects.
   const mcpState = useMcpBridge();
 
-  // Detect mobile viewport — apply the default panel state only when the
+  // Initialize from the real viewport on the first CLIENT render. The old
+  // `useState(false)` always painted the desktop layout first; on the Android
+  // WebView that first paint lingered above the real UI as a stale composited
+  // frame (the "squashed bars" artifact), because the effect-based flip ran
+  // only after hydration. SSR still prerenders desktop (window undefined).
+  //
+  // The resize listener applies the default panel state only when the
   // breakpoint is CROSSED, not on every resize event (mobile URL-bar
   // show/hide fires resize; re-applying the default destroyed the user's
   // explicit panel toggle every time). The FIRST measurement on a phone
@@ -318,21 +327,18 @@ export function PhotoEditor() {
         isMobile ? 'h-10' : 'h-8',
       )}>
         {isMobile && (
-          <Sheet open={menuSheetOpen} onOpenChange={setMenuSheetOpen}>
-            <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-9 w-9 touch-target shrink-0">
-                <Menu size={18} />
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="editor-surface editor-text border-r editor-border w-[280px] p-0">
-              <SheetHeader className="p-3 border-b editor-border">
-                <SheetTitle className="editor-text">Menu</SheetTitle>
-              </SheetHeader>
-              <div className="p-2 overflow-y-auto custom-scroll">
-                <MenuBar onOpenNewDoc={() => { setNewDocOpen(true); setMenuSheetOpen(false); }} onOpenFigmaImport={() => { setFigmaImportOpen(true); setMenuSheetOpen(false); }} />
-              </div>
-            </SheetContent>
-          </Sheet>
+          // Toggle for the compact horizontal command bar (MobileMenuBar).
+          // The old slide-out sheet embedded the desktop Radix Menubar, whose
+          // dropdowns never opened on touch — an empty panel behind a scrim.
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setMenuBarOpen((o) => !o)}
+            aria-expanded={menuBarOpen}
+            className={cn('h-9 w-9 touch-target shrink-0', menuBarOpen && 'editor-accent')}
+          >
+            {menuBarOpen ? <X size={18} /> : <Menu size={18} />}
+          </Button>
         )}
 
         {isMobile ? (
@@ -449,7 +455,7 @@ export function PhotoEditor() {
               hides it to save space; users can still access via menu) */}
           {!isMobile && <PerformanceControls />}
 
-          <ThemeToggle />
+          {!isMobile && <ThemeToggle />}
 
           {/* MCP connection status indicator — click to toggle (desktop only) */}
           {!isMobile && (
@@ -539,8 +545,16 @@ export function PhotoEditor() {
           )}>
             <EditorCanvas />
 
-            {/* Mobile: floating minimal dock (common tools, options drawer,
-                more-tools sheet) + edge buttons (Layers / Adjust / Luna). */}
+            {/* Mobile: compact horizontal command bar (toggled from the ☰
+                button) + floating minimal dock + edge buttons. */}
+            {isMobile && menuBarOpen && (
+              <MobileMenuBar
+                onClose={() => setMenuBarOpen(false)}
+                onOpenNewDoc={() => { setNewDocOpen(true); setMenuBarOpen(false); }}
+                onOpenFigmaImport={() => { setFigmaImportOpen(true); setMenuBarOpen(false); }}
+                onOpenShortcuts={() => { setShortcutsOpen(true); setMenuBarOpen(false); }}
+              />
+            )}
             {isMobile && (
               <MobileToolDock
                 onOpenPanel={(tab: MobilePanelTarget) => {

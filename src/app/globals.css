@@ -199,6 +199,15 @@
   scrollbar-width: thin;
   scrollbar-color: var(--editor-surface-3) transparent;
 }
+/* Fully hidden scrollbar — used by the mobile command bar chips (a visible
+   scrollbar strip under a floating pill reads as broken UI on phones). */
+.hide-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
 
 /* Checkerboard pattern for transparency (theme-aware) */
 .checkerboard {
