@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Background shown behind the system bars. With adjustMarginsForEdgeToEdge=force
+         (capacitor.config.ts) the WebView is inset by the real status/navigation-bar and
+         display-cutout insets, and this color fills the resulting strip. Values match the
+         app's light-mode page background. -->
+    <color name="app_window_background">#ffffff</color>
+</resources>

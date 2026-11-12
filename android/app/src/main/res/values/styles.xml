@@ -13,6 +13,11 @@
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
+        <!-- Strip behind the system bars (see values/colors.xml). Follows the
+             app's light/dark page background via the values-night qualifier. -->
+        <item name="android:windowBackground">@color/app_window_background</item>
+        <!-- Dark icons on the light status-bar strip (night override below). -->
+        <item name="android:windowLightStatusBar">true</item>
     </style>
 
 

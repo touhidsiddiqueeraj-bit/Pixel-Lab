@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Implicitly extends AppTheme.NoActionBar (values/styles.xml) and only
+         overrides the night-mode items. -->
+    <style name="AppTheme.NoActionBar">
+        <!-- Light icons on the dark status-bar strip. -->
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

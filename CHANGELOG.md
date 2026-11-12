@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🐛 Fixed
 
+#### Status bar clipped app content on Android 15+ (Android shell)
+- With `targetSdk 35`, Android 15+ enforces edge-to-edge drawing and Capacitor 7's default `adjustMarginsForEdgeToEdge: "disable"` meant the WebView rendered underneath the status bar — the top of the UI was hidden behind the notification bar.
+- Set `adjustMarginsForEdgeToEdge: "force"` in `capacitor.config.ts`: the WebView is now padded with the real system-bar and display-cutout insets (status bar, navigation bar / gesture pill, and notches) on every Android version — zero insets are a no-op where the window doesn't extend under bars.
+- The strip behind the system bars uses a window background matching the app theme (`#ffffff` light / `#0a0a0a` dark via `values-night` resources), with matching status-bar icon contrast (`windowLightStatusBar` light/night).
+
 #### TypeScript baseline errors (CI type gate could not pass)
 - `vectorize.ts`: `ImageData.data` (typed `ImageDataArray` in newer DOM libs) was passed to/assigned from `Uint8Array`-typed pipeline helpers — now copied once into a plain `Uint8Array` at the entry point.
 - `src/hooks/use-toast.ts` and `src/hooks/use-mobile.ts` deleted — dead shadcn-template code referencing a non-existent component (the app uses Sonner) with zero consumers.
