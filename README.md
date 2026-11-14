@@ -317,6 +317,12 @@ Pixel Lab ships as a native Android app. The full editor (static export of the w
 
 Because Luna talks to Google's Gemini API directly from the client, **everything works in the APK exactly as on the web**, including the AI assistant (just needs internet + your own Gemini API key).
 
+### Opening & Saving Photos (Android)
+
+- **Open** uses the Android Photo Picker (`@capacitor/camera`) — the system picker, works on every Android version.
+- **Save** writes the file into the public **Documents/PixelLab** folder (`@capacitor/filesystem`, MediaStore-backed), so exports are visible in the Files app and to other apps. The success toast tells you exactly where the file landed.
+- On Android 10 and newer **no permission is needed** (Android's scoped-storage design lets an app contribute its own files without asking) — the app is *supposed* to not show a permission dialog there. On Android 9 and older, saving shows the real storage permission dialog and retries after you grant it.
+
 ### Install from a Release
 
 1. Open the [Releases](https://github.com/touhidsiddiqueeraj-bit/Pixel-Lab/releases) page and grab `PixelLab-vX.Y.Z.apk` from the latest release.
@@ -362,11 +368,11 @@ Two GitHub Actions workflows keep the repo green and ship the APK:
 
 ```bash
 # After merging to main, tag and push:
-git tag v1.0.1
-git push origin v1.0.1
+git tag v1.0.3
+git push origin v1.0.3
 ```
 
-The Release APK workflow runs automatically and attaches `PixelLab-v1.0.1.apk` to a new GitHub Release. `versionCode` is the CI run number, so every build is monotonically newer and installable as an upgrade over any previous release.
+The Release APK workflow runs automatically and attaches `PixelLab-v1.0.3.apk` to a new GitHub Release. `versionCode` is the CI run number, so every build is monotonically newer and installable as an upgrade over any previous release.
 
 ---
 

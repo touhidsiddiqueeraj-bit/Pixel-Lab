@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 📁 File Access (Android shell)
+
+#### Open & save now actually work in the APK (native file I/O)
+- **Root cause — saving did nothing**: every save path used an `<a download>` click with a data:/blob: URL, but the Android WebView surfaces that as a `DownloadListener` event and Capacitor registers no DownloadListener — the tap was silently dropped (the "Exported as PNG" toast was a false positive). File inputs relied on the WebView's file chooser, which is unreliable across OEM builds. Neither path ever surfaced a permission dialog.
+- New `src/lib/file-io.ts` routes open/save through native Capacitor plugins inside the APK (plain web keeps the standard browser behaviour):
+  - **Save**: `@capacitor/filesystem` writes the export into the **public Documents folder** (`Documents/PixelLab/…`, MediaStore-backed on Android 10+). Android 10+ needs no permission for an app's own files — by design, which is why the app never *asked* for one on modern Android; on Android 9 and older the plugin shows the real storage permission dialog (`READ`/`WRITE_EXTERNAL_STORAGE` are declared in the manifest with `maxSdkVersion` caps) and retries the write after the user grants.
+  - **Open**: `@capacitor/camera` (`source: Photos`) launches the **Android Photo Picker** — the system picker UI, works on every Android version, no permission required.
+- All save/open sites now route through the helper: mobile command bar (Save PNG/JPG/WebP, Open Image), title-bar Export, Ctrl+S / Ctrl+Shift+S, the desktop menubar exports (including Batch Process's `edited-*.png` flow and quick-SVG), the Vectorize dialog's SVG export, and the automation/Recipes batch runner. Success toasts now state where the file landed (`Saved to Documents/PixelLab/…`).
+- The title-bar Export button's duplicated compositor now reuses the shared mask-aware one (it already honoured masks; the copy is gone).
+
 ### 📱 Mobile UI
 
 #### Compact horizontal command bar replaces the broken menu sheet

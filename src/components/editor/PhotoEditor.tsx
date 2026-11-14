@@ -39,8 +39,78 @@ import { MobileToolDock, MobilePanelTarget } from './MobileUI';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { describeFileError, isNativeApp, pickImageFromLibrary, saveCanvasImage } from '@/lib/file-io';
 
 type PanelTab = 'layers' | 'adjust' | 'develop' | 'color' | 'history' | 'nav' | 'agent' | 'automations';
+
+// ---------------------------------------------------------------------------
+// Document export — shared by the Ctrl+S / Ctrl+Shift+S shortcuts and the
+// title-bar Export button.
+//
+// Mask-aware compositor: the keyboard export path previously ignored layer
+// masks, so Ctrl+S exported the MASKED-OUT pixels — a silent content leak in
+// the output file (the menu/title-bar exports did honor masks, so the three
+// export buttons disagreed with each other).
+//
+// Saving itself goes through file-io: the Android WebView registers no
+// DownloadListener, so `a.download` clicks (data:/blob: URLs) are silently
+// dropped — in the native shell the Filesystem plugin writes the file into
+// the public Documents/PixelLab folder instead.
+// ---------------------------------------------------------------------------
+
+function flattenDocument(
+  state: ReturnType<typeof useEditorStore.getState>,
+  background: string | null,
+): HTMLCanvasElement {
+  const flat = document.createElement('canvas');
+  flat.width = state.docWidth;
+  flat.height = state.docHeight;
+  const ctx = flat.getContext('2d')!;
+  if (background) {
+    ctx.fillStyle = background;
+    ctx.fillRect(0, 0, flat.width, flat.height);
+  }
+  for (const layer of state.layers) {
+    if (!layer.visible) continue;
+    ctx.save();
+    ctx.globalAlpha = layer.opacity;
+    ctx.globalCompositeOperation = layer.blendMode as GlobalCompositeOperation;
+    if (layer.maskCanvas && layer.maskEnabled) {
+      const tmp = document.createElement('canvas');
+      tmp.width = state.docWidth;
+      tmp.height = state.docHeight;
+      const tctx = tmp.getContext('2d')!;
+      tctx.drawImage(layer.canvas, 0, 0);
+      tctx.globalCompositeOperation = 'destination-in';
+      tctx.drawImage(layer.maskCanvas, 0, 0);
+      ctx.drawImage(tmp, 0, 0);
+    } else {
+      ctx.drawImage(layer.canvas, 0, 0);
+    }
+    ctx.restore();
+  }
+  return flat;
+}
+
+async function exportDocument(
+  background: string | null,
+  mime: string,
+  quality: number,
+  ext: string,
+): Promise<void> {
+  const state = useEditorStore.getState();
+  const fileName = `${state.docName.replace(/\.[^/.]+$/, '')}.${ext}`;
+  try {
+    const result = await saveCanvasImage(flattenDocument(state, background), mime, quality, fileName);
+    toast.success(
+      isNativeApp()
+        ? `Saved to ${result.where}`
+        : `Exported as ${ext.toUpperCase()}`,
+    );
+  } catch (e) {
+    toast.error(describeFileError(e));
+  }
+}
 
 export function PhotoEditor() {
   const [newDocOpen, setNewDocOpen] = useState(false);
@@ -132,96 +202,31 @@ export function PhotoEditor() {
     return () => window.removeEventListener('pixel-lab-new-document', handler);
   }, []);
 
-  // Listen for the "open file" event (dispatched by Ctrl+O) — trigger a file input click
+  // Listen for the "open file" event (dispatched by Ctrl+O). In the native
+  // shell this launches the Android Photo Picker (no permission required,
+  // works on every Android version); on the web file-io falls back to a
+  // transient file input created synchronously so the browser keeps the
+  // user-activation gesture.
   useEffect(() => {
     const handler = () => {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = 'image/*';
-      input.onchange = () => {
-        const file = input.files?.[0];
-        if (!file) return;
-        if (!file.type.startsWith('image/')) {
-          toast.error(`"${file.name}" is not an image file`);
-          return;
-        }
-        const url = URL.createObjectURL(file);
-        const img = new Image();
-        img.onload = () => {
+      void pickImageFromLibrary()
+        .then((res) => {
+          if (!res) return;
           // openImage validates/clamps dimensions, commits synchronously
           // (no setTimeout race with another open/new), and pushes history.
-          useEditorStore.getState().openImage(img, file.name.replace(/\.[^/.]+$/, ''), `Open ${file.name}`);
-          URL.revokeObjectURL(url);
-        };
-        // Without onerror, a corrupt file left the object URL leaked and
-        // the user with no feedback at all.
-        img.onerror = () => {
-          URL.revokeObjectURL(url);
-          toast.error(`Could not read "${file.name}" — the file may be corrupt`);
-        };
-        img.src = url;
-      };
-      input.click();
+          useEditorStore.getState().openImage(res.img, res.name, `Open ${res.name}`);
+        })
+        .catch((e) => toast.error(describeFileError(e)));
     };
     window.addEventListener('pixel-lab-open-file', handler);
     return () => window.removeEventListener('pixel-lab-open-file', handler);
   }, []);
 
-  // Listen for quick export events (Ctrl+S, Ctrl+Shift+S).
-  // Shared mask-aware compositor: the keyboard export path previously
-  // ignored layer masks, so Ctrl+S exported the MASKED-OUT pixels — a silent
-  // content leak in the output file (the menu/title-bar exports did honor
-  // masks, so the three export buttons disagreed with each other).
+  // Listen for quick export events (Ctrl+S, Ctrl+Shift+S) — both route
+  // through the shared exportDocument helper above.
   useEffect(() => {
-    const flattenDoc = (state: ReturnType<typeof useEditorStore.getState>, background: string | null): HTMLCanvasElement => {
-      const flat = document.createElement('canvas');
-      flat.width = state.docWidth;
-      flat.height = state.docHeight;
-      const ctx = flat.getContext('2d')!;
-      if (background) {
-        ctx.fillStyle = background;
-        ctx.fillRect(0, 0, flat.width, flat.height);
-      }
-      for (const layer of state.layers) {
-        if (!layer.visible) continue;
-        ctx.save();
-        ctx.globalAlpha = layer.opacity;
-        ctx.globalCompositeOperation = layer.blendMode as GlobalCompositeOperation;
-        if (layer.maskCanvas && layer.maskEnabled) {
-          const tmp = document.createElement('canvas');
-          tmp.width = state.docWidth; tmp.height = state.docHeight;
-          const tctx = tmp.getContext('2d')!;
-          tctx.drawImage(layer.canvas, 0, 0);
-          tctx.globalCompositeOperation = 'destination-in';
-          tctx.drawImage(layer.maskCanvas, 0, 0);
-          ctx.drawImage(tmp, 0, 0);
-        } else {
-          ctx.drawImage(layer.canvas, 0, 0);
-        }
-        ctx.restore();
-      }
-      return flat;
-    };
-    const download = (canvas: HTMLCanvasElement, mime: string, quality: number, ext: string) => {
-      const state = useEditorStore.getState();
-      try {
-        const link = document.createElement('a');
-        link.href = canvas.toDataURL(mime, quality);
-        link.download = `${state.docName.replace(/\.[^/.]+$/, '')}.${ext}`;
-        link.click();
-        toast.success(`Exported as ${ext.toUpperCase()}`);
-      } catch {
-        toast.error('Export failed — the document may be too large for this browser');
-      }
-    };
-    const quickExport = () => {
-      const state = useEditorStore.getState();
-      download(flattenDoc(state, null), 'image/png', 1, 'png');
-    };
-    const exportJpeg = () => {
-      const state = useEditorStore.getState();
-      download(flattenDoc(state, '#ffffff'), 'image/jpeg', 0.9, 'jpg');
-    };
+    const quickExport = () => { void exportDocument(null, 'image/png', 1, 'png'); };
+    const exportJpeg = () => { void exportDocument('#ffffff', 'image/jpeg', 0.9, 'jpg'); };
     window.addEventListener('pixel-lab-quick-export', quickExport);
     window.addEventListener('pixel-lab-export-jpeg', exportJpeg);
     return () => {
@@ -401,34 +406,9 @@ export function PhotoEditor() {
             variant="ghost"
             size="sm"
             onClick={() => {
-              // Quick PNG export
-              const state = useEditorStore.getState();
-              const flat = document.createElement('canvas');
-              flat.width = state.docWidth;
-              flat.height = state.docHeight;
-              const ctx = flat.getContext('2d')!;
-              for (const layer of state.layers) {
-                if (!layer.visible) continue;
-                ctx.save();
-                ctx.globalAlpha = layer.opacity;
-                ctx.globalCompositeOperation = layer.blendMode as GlobalCompositeOperation;
-                if (layer.maskCanvas && layer.maskEnabled) {
-                  const tmp = document.createElement('canvas');
-                  tmp.width = state.docWidth; tmp.height = state.docHeight;
-                  const tctx = tmp.getContext('2d')!;
-                  tctx.drawImage(layer.canvas, 0, 0);
-                  tctx.globalCompositeOperation = 'destination-in';
-                  tctx.drawImage(layer.maskCanvas, 0, 0);
-                  ctx.drawImage(tmp, 0, 0);
-                } else {
-                  ctx.drawImage(layer.canvas, 0, 0);
-                }
-                ctx.restore();
-              }
-              const link = document.createElement('a');
-              link.href = flat.toDataURL('image/png');
-              link.download = `${state.docName.replace(/\.[^/.]+$/, '')}.png`;
-              link.click();
+              // Quick PNG export via the shared helper (native shell: writes
+              // to Documents/PixelLab — a.download is dropped by the WebView).
+              void exportDocument(null, 'image/png', 1, 'png');
             }}
             className={cn('editor-text-muted hover:editor-surface-3 gap-1', isMobile ? 'h-9 w-9 p-0' : 'h-7 px-2')}
             title="Quick Export PNG"

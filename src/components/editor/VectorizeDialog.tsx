@@ -11,6 +11,7 @@ import { svgToCanvas } from '@/lib/vectorize';
 import { generateThumbnail, createBlankCanvas } from '@/lib/image-processing';
 import { toast } from 'sonner';
 import { Spline, Download, Loader2, Wand2 } from 'lucide-react';
+import { describeFileError, isNativeApp, saveTextFile } from '@/lib/file-io';
 
 interface VectorizeDialogProps {
   open: boolean;
@@ -109,18 +110,16 @@ export function VectorizeDialog({ open, onClose }: VectorizeDialogProps) {
     }
   }, [result, mode, addLayer, replaceLayerCanvas, refreshThumbnail, pushHistory, activeLayerId, onClose]);
 
-  const handleExportSVG = useCallback(() => {
+  const handleExportSVG = useCallback(async () => {
     if (!result) return;
-    const blob = new Blob([result.svg], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `vectorized-${Date.now()}.svg`;
-    link.click();
-    // Defer the revoke — revoking synchronously after click() can cancel the
-    // download in Firefox/older Chrome before it starts.
-    setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    toast.success('SVG exported');
+    try {
+      // Native shell: writes into Documents/PixelLab (the Android WebView
+      // silently drops a.download clicks); web keeps the browser download.
+      const saved = await saveTextFile(result.svg, `vectorized-${Date.now()}.svg`, 'image/svg+xml');
+      toast.success(isNativeApp() ? `Saved to ${saved.where}` : 'SVG exported');
+    } catch (e) {
+      toast.error(describeFileError(e));
+    }
   }, [result]);
 
   // Reset when dialog closes

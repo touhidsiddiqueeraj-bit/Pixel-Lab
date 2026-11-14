@@ -22,6 +22,7 @@ import {
   type AgentWorkspace,
 } from '@/lib/agent/tools';
 import { createBlankCanvas, generateThumbnail } from '@/lib/image-processing';
+import { saveCanvasImage } from '@/lib/file-io';
 import type { LayerData } from '@/lib/editor-types';
 import { cloneLayer, snapshotWorkspace, commitWorkspace } from '@/lib/workspace-utils';
 
@@ -191,12 +192,11 @@ export async function runAutomationBatch(
       results.push(result);
       onProgress?.(i, result);
 
-      // Trigger download.
-      const link = document.createElement('a');
-      link.href = outputDataUrl;
+      // Trigger the download. file-io routes the write into the public
+      // Documents folder in the native shell (the Android WebView silently
+      // drops a.download clicks); the web keeps the browser download.
       const baseName = file.name.replace(/\.[^/.]+$/, '');
-      link.download = `${baseName}-edited.png`;
-      link.click();
+      await saveCanvasImage(composite, 'image/png', 1, `${baseName}-edited.png`);
     } catch (e) {
       const result: BatchResult = {
         fileName: file.name,

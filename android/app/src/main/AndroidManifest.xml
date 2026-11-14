@@ -38,4 +38,12 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Storage: the Filesystem plugin shows the runtime permission dialog on
+         Android 9 and older when saving into the public Documents folder, and
+         these strings must be declared in the app manifest for that dialog to
+         appear (the plugin's own manifest is empty). Android 10 and newer use
+         MediaStore for the app's own files, so no permission is needed there;
+         maxSdkVersion keeps the legacy strings out of modern builds. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
 </manifest>

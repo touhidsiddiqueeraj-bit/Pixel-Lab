@@ -51,6 +51,7 @@ import {
   generateThumbnail,
   clampImageSize,
 } from '@/lib/image-processing';
+import { describeFileError, isNativeApp, pickImageFromLibrary, saveCanvasImage, saveTextFile } from '@/lib/file-io';
 
 /** Strip characters browsers reject in the download attribute (and path
  * separators from user-typed document names). */
@@ -95,6 +96,16 @@ export function MenuBar({ onOpenNewDoc, onOpenFigmaImport }: { onOpenNewDoc: () 
   }, [layers, activeLayerId]);
 
   const handleOpenFile = useCallback(() => {
+    // Native shell (tablet layout): the WebView file chooser is unreliable,
+    // so open via the Android Photo Picker instead. Web: classic input.
+    if (isNativeApp()) {
+      void pickImageFromLibrary()
+        .then((res) => {
+          if (res) useEditorStore.getState().openImage(res.img, res.name, 'Open Image');
+        })
+        .catch((e) => toast.error(describeFileError(e)));
+      return;
+    }
     fileInputRef.current?.click();
   }, []);
 
@@ -123,7 +134,7 @@ export function MenuBar({ onOpenNewDoc, onOpenFigmaImport }: { onOpenNewDoc: () 
     e.target.value = '';
   }, []);
 
-  const handleExport = useCallback((format: 'png' | 'jpeg' | 'webp') => {
+  const handleExport = useCallback(async (format: 'png' | 'jpeg' | 'webp') => {
     try {
       const flat = createBlankCanvas(docWidth, docHeight);
       const ctx = flat.getContext('2d')!;
@@ -150,12 +161,15 @@ export function MenuBar({ onOpenNewDoc, onOpenFigmaImport }: { onOpenNewDoc: () 
         ctx.restore();
       }
       const mime = format === 'png' ? 'image/png' : format === 'jpeg' ? 'image/jpeg' : 'image/webp';
-      const dataUrl = flat.toDataURL(mime, 0.95);
-      const link = document.createElement('a');
-      link.href = dataUrl;
-      link.download = `${sanitizeFileName(docName.replace(/\.[^/.]+$/, ''))}.${format}`;
-      link.click();
-      toast.success(`Exported as ${format.toUpperCase()}`);
+      const fileName = `${sanitizeFileName(docName.replace(/\.[^/.]+$/, ''))}.${format}`;
+      // file-io: native shell writes into Documents/PixelLab (the WebView
+      // drops a.download clicks); web keeps the browser download.
+      const result = await saveCanvasImage(flat, mime, 0.95, fileName);
+      toast.success(
+        isNativeApp()
+          ? `Saved to ${result.where}`
+          : `Exported as ${format.toUpperCase()}`,
+      );
     } catch {
       // toDataURL on a huge document can throw (OOM) — surface it instead of
       // failing silently after the user waited for the encode.
@@ -402,12 +416,9 @@ export function MenuBar({ onOpenNewDoc, onOpenFigmaImport }: { onOpenNewDoc: () 
                   }
                   // Export as PNG (browsers don't support toDataURL('image/gif') for animation; use a library would be needed)
                   // Fall back to PNG with .gif extension note
-                  const dataUrl = flat.toDataURL('image/png');
-                  const link = document.createElement('a');
-                  link.href = dataUrl;
-                  link.download = `${docName.replace(/\.[^/.]+$/, '')}.png`;
-                  link.click();
-                  toast.success('Exported (animated GIF requires multiple frames; exported current composite as PNG)', { id: tid });
+                  const fileName = `${docName.replace(/\.[^/.]+$/, '')}.png`;
+                  const result = await saveCanvasImage(flat, 'image/png', 1, fileName);
+                  toast.success('Exported (animated GIF requires multiple frames; exported current composite as PNG)' + (isNativeApp() ? ` — saved to ${result.where}` : ''), { id: tid });
                 } catch (e) {
                   toast.error('Export failed', { id: tid });
                 }
@@ -467,7 +478,7 @@ export function MenuBar({ onOpenNewDoc, onOpenFigmaImport }: { onOpenNewDoc: () 
                       const url = URL.createObjectURL(file);
                       await new Promise<void>((resolve, reject) => {
                         const img = new Image();
-                        img.onload = () => {
+                        img.onload = async () => {
                           try {
                             // Clamp dimensions — a crafted "dimension bomb"
                             // image froze the tab on a multi-GB canvas.
@@ -475,10 +486,12 @@ export function MenuBar({ onOpenNewDoc, onOpenFigmaImport }: { onOpenNewDoc: () 
                             const canvas = createBlankCanvas(w, h);
                             const ctx = canvas.getContext('2d')!;
                             ctx.drawImage(img, 0, 0, w, h);
-                            const link = document.createElement('a');
-                            link.href = canvas.toDataURL('image/png');
-                            link.download = `edited-${sanitizeFileName(file.name.replace(/\.[^/.]+$/, ''))}.png`;
-                            link.click();
+                            await saveCanvasImage(
+                              canvas,
+                              'image/png',
+                              1,
+                              `edited-${sanitizeFileName(file.name.replace(/\.[^/.]+$/, ''))}.png`,
+                            );
                             processed++;
                             resolve();
                           } catch (err) {
@@ -1105,14 +1118,8 @@ export function MenuBar({ onOpenNewDoc, onOpenFigmaImport }: { onOpenNewDoc: () 
                     detail: 60,
                     blurRadius: 1,
                   });
-                  const blob = new Blob([result.svg], { type: 'image/svg+xml' });
-                  const url = URL.createObjectURL(blob);
-                  const link = document.createElement('a');
-                  link.href = url;
-                  link.download = `vectorized-${Date.now()}.svg`;
-                  link.click();
-                  URL.revokeObjectURL(url);
-                  toast.success(`SVG exported: ${result.paths.length} paths`, { id: tid });
+                  const saved = await saveTextFile(result.svg, `vectorized-${Date.now()}.svg`, 'image/svg+xml');
+                  toast.success(`SVG exported: ${result.paths.length} paths` + (isNativeApp() ? ` — saved to ${saved.where}` : ''), { id: tid });
                 } catch (e) {
                   toast.error('Vectorization failed', { id: tid });
                 }

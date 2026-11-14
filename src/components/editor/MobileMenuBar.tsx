@@ -38,6 +38,7 @@ import {
 } from '@/lib/image-processing';
 import { useEditorStore } from '@/lib/editor-store';
 import { cn } from '@/lib/utils';
+import { describeFileError, isNativeApp, pickImageFromLibrary, saveCanvasImage } from '@/lib/file-io';
 
 type Category = 'root' | 'file' | 'image' | 'layer' | 'filter' | 'enhance' | 'vector' | 'view';
 
@@ -89,7 +90,7 @@ export function MobileMenuBar({ onClose, onOpenNewDoc, onOpenFigmaImport, onOpen
     useEditorStore.getState().pushHistory(label);
   };
 
-  const exportAs = (format: 'png' | 'jpeg' | 'webp') => {
+  const exportAs = async (format: 'png' | 'jpeg' | 'webp') => {
     try {
       const { layers, docWidth, docHeight, docName } = useEditorStore.getState();
       const flat = createBlankCanvas(docWidth, docHeight);
@@ -116,13 +117,18 @@ export function MobileMenuBar({ onClose, onOpenNewDoc, onOpenFigmaImport, onOpen
         ctx.restore();
       }
       const mime = format === 'png' ? 'image/png' : format === 'jpeg' ? 'image/jpeg' : 'image/webp';
-      const link = document.createElement('a');
-      link.href = flat.toDataURL(mime, 0.95);
-      link.download = `${sanitizeFileName(docName.replace(/\.[^/.]+$/, ''))}.${format}`;
-      link.click();
-      toast.success(`Exported as ${format.toUpperCase()}`);
-    } catch {
-      toast.error('Export failed — the document may be too large');
+      const fileName = `${sanitizeFileName(docName.replace(/\.[^/.]+$/, ''))}.${format}`;
+      // Native shell: a.download is silently dropped by the Android WebView
+      // (no DownloadListener), so writes go through the Filesystem plugin into
+      // the public Documents folder instead.
+      const result = await saveCanvasImage(flat, mime, 0.95, fileName);
+      toast.success(
+        isNativeApp()
+          ? `Saved to ${result.where}`
+          : `Exported as ${format.toUpperCase()}`,
+      );
+    } catch (e) {
+      toast.error(describeFileError(e));
     }
   };
 
@@ -211,7 +217,20 @@ export function MobileMenuBar({ onClose, onOpenNewDoc, onOpenFigmaImport, onOpen
   const actions: Record<Exclude<Category, 'root'>, React.ReactNode[]> = {
     file: [
       chip({ key: 'new', icon: <FilePlus2 size={15} />, label: 'New…', onClick: () => { onOpenNewDoc(); close(); } }),
-      chip({ key: 'open', icon: <FolderOpen size={15} />, label: 'Open Image…', onClick: () => document.getElementById('mobile-open-image-input')?.click() }),
+      // Native shell: launches the Android Photo Picker (no permission
+      // needed on any Android version). Web: transient file input.
+      chip({
+        key: 'open',
+        icon: <FolderOpen size={15} />, label: 'Open Image…',
+        onClick: () => {
+          void pickImageFromLibrary()
+            .then((res) => {
+              if (!res) return;
+              useEditorStore.getState().openImage(res.img, res.name, 'Open Photo');
+            })
+            .catch((e) => toast.error(describeFileError(e)));
+        },
+      }),
       chip({ key: 'png', icon: <ImageDown size={15} />, label: 'Save PNG', onClick: () => exportAs('png') }),
       chip({ key: 'jpg', icon: <FileImage size={15} />, label: 'Save JPG', onClick: () => exportAs('jpeg') }),
       chip({ key: 'webp', icon: <FileUp size={15} />, label: 'Save WebP', onClick: () => exportAs('webp') }),
@@ -288,27 +307,6 @@ export function MobileMenuBar({ onClose, onOpenNewDoc, onOpenFigmaImport, onOpen
       role="toolbar"
       aria-label="Menu commands"
     >
-      <input id="mobile-open-image-input" type="file" accept="image/*" className="hidden" onChange={(e) => {
-        const file = e.target.files?.[0];
-        e.target.value = '';
-        if (!file) return;
-        if (!file.type.startsWith('image/')) {
-          toast.error(`"${file.name}" is not an image file`);
-          return;
-        }
-        const url = URL.createObjectURL(file);
-        const img = new Image();
-        img.onload = () => {
-          useEditorStore.getState().openImage(img, file.name.replace(/\.[^/.]+$/, ''), 'Open Image');
-          URL.revokeObjectURL(url);
-          close();
-        };
-        img.onerror = () => {
-          URL.revokeObjectURL(url);
-          toast.error(`Could not read "${file.name}" — the file may be corrupt`);
-        };
-        img.src = url;
-      }} />
       <div className="editor-glass backdrop-blur border editor-border rounded-2xl shadow-lg no-select">
         <div className="flex items-center gap-1 p-1.5 overflow-x-auto hide-scrollbar">
           {category === 'root' ? (
