@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Nothing yet — push a `v*` tag to trigger the Release APK workflow, then move the changes here under a new version heading.
+
+## [1.0.3] — 2026-11-14
+
 ### 📁 File Access (Android shell)
 
 #### Open & save now actually work in the APK (native file I/O)
@@ -18,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Open**: `@capacitor/camera` (`source: Photos`) launches the **Android Photo Picker** — the system picker UI, works on every Android version, no permission required.
 - All save/open sites now route through the helper: mobile command bar (Save PNG/JPG/WebP, Open Image), title-bar Export, Ctrl+S / Ctrl+Shift+S, the desktop menubar exports (including Batch Process's `edited-*.png` flow and quick-SVG), the Vectorize dialog's SVG export, and the automation/Recipes batch runner. Success toasts now state where the file landed (`Saved to Documents/PixelLab/…`).
 - The title-bar Export button's duplicated compositor now reuses the shared mask-aware one (it already honoured masks; the copy is gone).
+
+
+## [1.0.2] — 2026-11-12
 
 ### 📱 Mobile UI
 
@@ -30,6 +37,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Root-cause chain: the static export prerendered the **desktop** layout (`isMobile` initialized `false`), so the WebView's first paint was desktop chrome; the edge-to-edge inset strip above the app then showed the window background — which was still the Capacitor default **splash bitmap**, its logo squashed into the strip next to remnants of that first frame.
 - Fixes: PhotoEditor now mounts **client-only** (`ssr: false`) so the first paint on any device is the correct layout; `isMobile` initializes from the real viewport on first client render; the Android launch theme background is a solid theme-matched color instead of the Capacitor splash bitmap.
 
+
+## [1.0.1] — 2026-11-12
+
+### 🐛 Fixed
+
+#### Status bar clipped app content on Android 15+ (Android shell)
+- With `targetSdk 35`, Android 15+ enforces edge-to-edge drawing and Capacitor 7's default `adjustMarginsForEdgeToEdge: "disable"` meant the WebView rendered underneath the status bar — the top of the UI was hidden behind the notification bar.
+- Set `adjustMarginsForEdgeToEdge: "force"` in `capacitor.config.ts`: the WebView is now padded with the real system-bar and display-cutout insets (status bar, navigation bar / gesture pill, and notches) on every Android version — zero insets are a no-op where the window doesn't extend under bars.
+- The strip behind the system bars uses a window background matching the app theme (`#ffffff` light / `#0a0a0a` dark via `values-night` resources), with matching status-bar icon contrast (`windowLightStatusBar` light/night).
+
+
+## [1.0.0] — 2026-11-11
+
 ### 🚀 CI/CD & Distribution
 
 #### Android APK releases (Capacitor 7)
@@ -40,12 +60,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### CI workflow (`.github/workflows/ci.yml`)
 - Pushes to `main` and PRs now gate on `tsc --noEmit` (zero errors), `eslint src/` (zero problems) and a production web build.
 
-### 🐛 Fixed
 
-#### Status bar clipped app content on Android 15+ (Android shell)
-- With `targetSdk 35`, Android 15+ enforces edge-to-edge drawing and Capacitor 7's default `adjustMarginsForEdgeToEdge: "disable"` meant the WebView rendered underneath the status bar — the top of the UI was hidden behind the notification bar.
-- Set `adjustMarginsForEdgeToEdge: "force"` in `capacitor.config.ts`: the WebView is now padded with the real system-bar and display-cutout insets (status bar, navigation bar / gesture pill, and notches) on every Android version — zero insets are a no-op where the window doesn't extend under bars.
-- The strip behind the system bars uses a window background matching the app theme (`#ffffff` light / `#0a0a0a` dark via `values-night` resources), with matching status-bar icon contrast (`windowLightStatusBar` light/night).
+## [0.6.x] — untagged mainline (2026-11-06 → 2026-11-11, between the `v0.6` and `v1.0.0` tags)
+
+Fixes and features below shipped to `main` before the release pipeline existed — they were never separately tagged.
+
+### 🐛 Fixed
 
 #### TypeScript baseline errors (CI type gate could not pass)
 - `vectorize.ts`: `ImageData.data` (typed `ImageDataArray` in newer DOM libs) was passed to/assigned from `Uint8Array`-typed pipeline helpers — now copied once into a plain `Uint8Array` at the entry point.
@@ -200,6 +220,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Wired into **MenuBar.tsx** (File → Import from Figma...) and **PhotoEditor.tsx** (state + dialog mount)
 
 ---
+
 
 ## [0.3.0] — 2026-07-19
 

@@ -322,6 +322,11 @@ Because Luna talks to Google's Gemini API directly from the client, **everything
 - **Open** uses the Android Photo Picker (`@capacitor/camera`) — the system picker, works on every Android version.
 - **Save** writes the file into the public **Documents/PixelLab** folder (`@capacitor/filesystem`, MediaStore-backed), so exports are visible in the Files app and to other apps. The success toast tells you exactly where the file landed.
 - On Android 10 and newer **no permission is needed** (Android's scoped-storage design lets an app contribute its own files without asking) — the app is *supposed* to not show a permission dialog there. On Android 9 and older, saving shows the real storage permission dialog and retries after you grant it.
+- Declared in the manifest (version-scoped): `READ_EXTERNAL_STORAGE` (`maxSdkVersion="32"`) and `WRITE_EXTERNAL_STORAGE` (`maxSdkVersion="29"`). No `READ_MEDIA_*` runtime requests — the Photo Picker and MediaStore inserts need none.
+
+All open/save flows route through one platform-aware module (`src/lib/file-io.ts`), used by the mobile command bar, the title-bar Export button, the keyboard shortcuts, the desktop menubar exports (incl. Batch Process), the Vectorize dialog, and the Recipes batch runner.
+
+**Web version:** the same module keeps the classic browser behaviour everywhere — downloads via the file-picker/download attribute, opening via `<input type="file">` — so the web app is unchanged by the Android work (verified: typecheck, lint, production build and browser smoke test all green on `main`).
 
 ### Install from a Release
 
@@ -579,7 +584,7 @@ pixel-lab/
 | [**Extensions**](EXTENSIONS.md) | How to create automation recipes, connect external AI agents via MCP, add new tools, and extend Pixel Lab programmatically |
 | [**Contributing**](CONTRIBUTING.md) | Dev setup, coding standards, how to add new tools / filters / agent tools, PR process, test scripts |
 | [**Security Notes**](SECURITY_NOTES.md) | Honest disclosure of Luna API key handling + preference memory storage — what's safe, what isn't, what you can do |
-| [**Changelog**](CHANGELOG.md) | Notable changes per release (latest: magnetic lasso fix, mobile redesign, Luna self-eval + preference memory) |
+| [**Changelog**](CHANGELOG.md) | Notable changes per release (latest: v1.0.3 — native open/save on Android; v1.0.2 — mobile command bar; v1.0.1 — status-bar inset fix) |
 | [**Code of Conduct**](.github/CODE_OF_CONDUCT.md) | Contributor Covenant — our community standards |
 
 ---
@@ -588,8 +593,9 @@ pixel-lab/
 
 ### Recently shipped ✅
 
-- **🆕 Mobile command bar + squashed-top-bar fix** — the broken slide-out menu (empty panel, its desktop dropdowns never opened on touch) is now a compact horizontal chip bar under the header; the phantom bars above the mobile header on Android (stale desktop first-paint + Capacitor splash leaking into the inset strip) are fixed via client-only mount and a solid launch background
-- **🆕 Android APK releases** — Capacitor 7 shell around a static export; signed APKs published automatically to GitHub Releases via the tag-driven CI/CD pipeline (release notes + SHA-256 included)
+- **🆕 Native open/save on Android (v1.0.3)** — the WebView silently dropped every `a[download]` export (no DownloadListener) and its file chooser was unreliable on OEM builds. All flows now route through `src/lib/file-io.ts`: open via the Android Photo Picker (`@capacitor/camera`), save into the public Documents/PixelLab folder via MediaStore (`@capacitor/filesystem`, permissionless on Android 10+; storage-permission dialog + retry on Android 9-). Web behaviour unchanged.
+- **🆕 Mobile command bar + squashed-top-bar fix (v1.0.2)** — the broken slide-out menu (empty panel, its desktop dropdowns never opened on touch) is now a compact horizontal chip bar under the header; the phantom bars above the mobile header on Android (stale desktop first-paint + Capacitor splash leaking into the inset strip) are fixed via client-only mount and a solid launch background
+- **🆕 Android APK releases (v1.0.0)** — Capacitor 7 shell around a static export; signed APKs published automatically to GitHub Releases via the tag-driven CI/CD pipeline (release notes + SHA-256 included; v1.0.1 fixed status-bar clipping)
 - **🆕 Minimalistic mobile UI redesign** — canvas-first layout with a floating tool dock (one-tap common tools, "More tools" sheet, bottom-sheet panels, 44px+ touch targets)
 - **🆕 Magnetic Lasso fixed** — proper BT.601 luminance + lowered Sobel threshold for reliable edge snapping; click-to-add manual anchors; double-click / Enter to close; pulsing start-anchor + snapped-point visual feedback; per-move `setSelection` allocation removed (no more UI freeze on large docs)
 - **🆕 Luna vision self-evaluation** — after tool calls, a vision model reviews BEFORE/AFTER and scores the edit 1–10. Scores <7 trigger automatic retry with feedback (up to 2 retries). Bad edits are caught before you see them.
