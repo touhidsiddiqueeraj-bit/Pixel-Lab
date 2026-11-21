@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet — push a `v*` tag to trigger the Release APK workflow, then move the changes here under a new version heading.
 
+## [1.0.4] — 2026-11-21
+
+### 📗 Docs
+
+#### Documentation-only refresh over v1.0.3
+- No editor code changes since v1.0.3 — this release ships the documentation landed on `main` after the v1.0.3 tag: the README gained a "Web version" section (running the plain web build alongside the APK) and Android open/save permission notes (why the app never shows a storage-permission dialog on Android 10+, and what happens on Android 9 and older).
+- The changelog itself is now versioned per release: the v1.0.0 → v1.0.3 entries moved out of `[Unreleased]` under dated headings.
+- The APK is rebuilt with `versionName 1.0.4` and a bumped `versionCode` (CI run number), so it installs as a straight upgrade over the v1.0.3 app with no functional delta.
+
 ## [1.0.3] — 2026-11-14
 
 ### 📁 File Access (Android shell)
