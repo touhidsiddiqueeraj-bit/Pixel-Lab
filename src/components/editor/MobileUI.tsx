@@ -29,14 +29,17 @@ import {
   MessageCircle, RefreshCw, Wind, Shrink, Expand, RotateCw, Minus,
   Hand, ZoomIn, ChevronDown, Triangle, Crosshair, FlipHorizontal2,
   Columns2, Grid2x2, Sun, Sparkles, Layers, SlidersHorizontal, Menu as MenuIcon,
+  XCircle,
 } from 'lucide-react';
 import { useEditorStore } from '@/lib/editor-store';
 import { useAgentStore } from '@/lib/agent/agent-store';
+import { toast } from 'sonner';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ToolType } from '@/lib/editor-types';
+import { MobileAdjustDrawer } from './MobileAdjustDrawer';
 
 // Which panel tab to open from the floating edge buttons — PhotoEditor owns
 // the tabs, so it just receives this value back.
@@ -164,9 +167,14 @@ export function MobileToolDock({
   const activeTool = useEditorStore((s) => s.activeTool);
   const agentApiKey = useAgentStore((s) => s.apiKey);
   const agentStatus = useAgentStore((s) => s.status);
+  const selectionBounds = useEditorStore((s) => s.selectionBounds);
+  const clearSelection = useEditorStore((s) => s.clearSelection);
 
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  // Snapseed-style adjust drawer (replaces the old side-sheet Adjust panel
+  // that covered the photo).
+  const [adjustOpen, setAdjustOpen] = useState(false);
 
   // Switching to a tool without settings must close the drawer — otherwise it
   // would linger showing a stale tool's controls. This uses React's official
@@ -176,9 +184,18 @@ export function MobileToolDock({
     setOptionsOpen(false);
   }
 
+  // Only one bottom drawer at a time: opening the adjust drawer dismisses
+  // the tool options drawer (and vice versa via the buttons below).
+  if (adjustOpen && optionsOpen) {
+    setOptionsOpen(false);
+  }
+
   const setTool = useEditorStore((s) => s.setTool);
 
   const handleDockTap = useCallback((tool: ToolType) => {
+    // Starting a different tool while the adjust drawer is open dismisses
+    // it — one bottom drawer at a time, and painting wins the user's intent.
+    if (adjustOpen) setAdjustOpen(false);
     if (tool === activeTool) {
       // Tap the ALREADY-active tool → toggle its options drawer. This is the
       // zero-extra-buttons way to reach settings; the badge chevron on the
@@ -187,28 +204,41 @@ export function MobileToolDock({
       return;
     }
     setTool(tool);
-  }, [activeTool, setTool]);
+  }, [activeTool, setTool, adjustOpen]);
 
   return (
     <>
-      {/* Floating edge buttons — Layers / Adjust / Luna. Vertically centered
-          on the right edge, clear of the zoom cluster (bottom) and the
-          title bar (top). Fade out while the options drawer is open so the
-          drawer can use the full width without visual pile-up. */}
+      {/* Floating edge buttons — Layers / Adjust / Luna (+ Deselect when a
+          selection is active). Vertically centered on the right edge, clear of
+          the zoom cluster (bottom) and the title bar (top). Fade out while a
+          bottom drawer is open so the drawer can use the full width without
+          visual pile-up. */}
       <div className={cn(
         'absolute right-2 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-2 transition-opacity duration-150',
-        optionsOpen && 'opacity-0 pointer-events-none',
+        (optionsOpen || adjustOpen) && 'opacity-0 pointer-events-none',
       )}>
         <FloatingEdgeButton
           icon={<Layers size={19} />}
           label="Layers"
           onClick={() => onOpenPanel('layers')}
         />
+        {/* Adjust opens the Snapseed-style bottom drawer — NOT the side
+            sheet: the photo stays visible above the drawer. */}
         <FloatingEdgeButton
           icon={<Sun size={19} />}
           label="Adjust"
-          onClick={() => onOpenPanel('adjust')}
+          onClick={() => { setOptionsOpen(false); setAdjustOpen(true); }}
         />
+        {/* Contextual Deselect — appears only while a selection is active.
+            Touch has no Esc key and no desktop toolbar, so this floating ✕
+            (plus Select ▸ Deselect in the command bar) is THE way out. */}
+        {selectionBounds && (
+          <FloatingEdgeButton
+            icon={<XCircle size={19} />}
+            label="Deselect"
+            onClick={() => { clearSelection(); toast('Selection cleared'); }}
+          />
+        )}
         <FloatingEdgeButton
           icon={<Sparkles size={19} />}
           label="Luna (AI)"
@@ -225,6 +255,9 @@ export function MobileToolDock({
           DOM order here so it stacks visually above the dock (both are
           siblings inside the canvas wrapper). */}
       {optionsOpen && <MobileOptionsDrawer onClose={() => setOptionsOpen(false)} />}
+
+      {/* Snapseed-style adjust drawer — same slot as the options drawer. */}
+      {adjustOpen && <MobileAdjustDrawer onClose={() => setAdjustOpen(false)} />}
 
       {/* The dock itself: a translucent floating pill pinned into the
           canvas wrapper's bottom padding zone. */}
@@ -432,7 +465,7 @@ function MobileOptionsDrawer({ onClose }: { onClose: () => void }) {
               title="Tap, then tap the canvas to set the clone/heal source"
             >
               <Crosshair size={13} />
-              {settingSource ? 'Tap canvas to set source…' : 'Set Source (Alt+Click)'}
+              {settingSource ? 'Tap canvas to set source…' : 'Set Source'}
             </Button>
           </>
         )}

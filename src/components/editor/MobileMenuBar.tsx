@@ -27,8 +27,8 @@ import {
   Scaling, RotateCw, FlipHorizontal, FlipVertical,
   Plus, Copy, Trash2, Merge, Layers2,
   Contrast, RefreshCcw, SunMedium, Aperture, Droplets, Grid3x3, Circle, Sparkle, Stamp, Palette,
-  Wand2, Zap,
-  Moon, Sun, Monitor, Keyboard, Spline,
+  Wand2, Zap, BoxSelect,
+  Moon, Sun, Monitor, Spline,
 } from 'lucide-react';
 import {
   applyGrayscale, applyInvert, applySepia, applyFastBlur, applySharpen,
@@ -40,13 +40,12 @@ import { useEditorStore } from '@/lib/editor-store';
 import { cn } from '@/lib/utils';
 import { describeFileError, isNativeApp, pickImageFromLibrary, saveCanvasImage } from '@/lib/file-io';
 
-type Category = 'root' | 'file' | 'image' | 'layer' | 'filter' | 'enhance' | 'vector' | 'view';
+type Category = 'root' | 'file' | 'image' | 'layer' | 'select' | 'filter' | 'enhance' | 'vector' | 'view';
 
 interface MobileMenuBarProps {
   onClose: () => void;
   onOpenNewDoc: () => void;
   onOpenFigmaImport: () => void;
-  onOpenShortcuts: () => void;
 }
 
 function sanitizeFileName(name: string): string {
@@ -54,7 +53,7 @@ function sanitizeFileName(name: string): string {
   return cleaned || 'untitled';
 }
 
-export function MobileMenuBar({ onClose, onOpenNewDoc, onOpenFigmaImport, onOpenShortcuts }: MobileMenuBarProps) {
+export function MobileMenuBar({ onClose, onOpenNewDoc, onOpenFigmaImport }: MobileMenuBarProps) {
   const [category, setCategory] = useState<Category>('root');
   const { theme, setTheme } = useTheme();
 
@@ -198,6 +197,9 @@ export function MobileMenuBar({ onClose, onOpenNewDoc, onOpenFigmaImport, onOpen
     { key: 'file', icon: <FilePlus2 size={15} />, label: 'File' },
     { key: 'image', icon: <ImageDown size={15} />, label: 'Image' },
     { key: 'layer', icon: <Layers2 size={15} />, label: 'Layer' },
+    // Select category — the touch answer to desktop's Ctrl+A/Ctrl+D/Ctrl+Shift+I
+    // (marquee tools get a selection going, but touch has no Esc to end it).
+    { key: 'select', icon: <BoxSelect size={15} />, label: 'Select' },
     { key: 'filter', icon: <Sparkle size={15} />, label: 'Filter' },
     { key: 'enhance', icon: <Wand2 size={15} />, label: 'Enhance' },
     { key: 'vector', icon: <Spline size={15} />, label: 'Vector' },
@@ -249,6 +251,11 @@ export function MobileMenuBar({ onClose, onOpenNewDoc, onOpenFigmaImport, onOpen
       chip({ key: 'merge', icon: <Merge size={15} />, label: 'Merge Down', onClick: () => { const s = useEditorStore.getState(); if (s.activeLayerId) s.mergeDown(s.activeLayerId); } }),
       chip({ key: 'flat', icon: <Layers2 size={15} />, label: 'Flatten', onClick: () => useEditorStore.getState().flattenImage() }),
     ],
+    select: [
+      chip({ key: 'all', icon: <BoxSelect size={15} />, label: 'Select All', onClick: () => useEditorStore.getState().selectAll() }),
+      chip({ key: 'none', icon: <Circle size={15} />, label: 'Deselect', onClick: () => useEditorStore.getState().clearSelection() }),
+      chip({ key: 'inv', icon: <RefreshCcw size={15} />, label: 'Invert Selection', onClick: () => useEditorStore.getState().invertSelection() }),
+    ],
     filter: [
       chip({ key: 'gray', icon: <Contrast size={15} />, label: 'Grayscale', onClick: () => runFilter('Grayscale', (ctx, w, h) => applyGrayscale(ctx, w, h)) }),
       chip({ key: 'invert', icon: <RefreshCcw size={15} />, label: 'Invert', onClick: () => runFilter('Invert', (ctx, w, h) => applyInvert(ctx, w, h)) }),
@@ -297,7 +304,9 @@ export function MobileMenuBar({ onClose, onOpenNewDoc, onOpenFigmaImport, onOpen
     view: [
       chip({ key: 'theme', icon: theme === 'dark' ? <Moon size={15} /> : theme === 'light' ? <Sun size={15} /> : <Monitor size={15} />,
         label: `Theme: ${theme === 'dark' ? 'Dark' : theme === 'light' ? 'Light' : 'System'}`, onClick: cycleTheme, keepsOpen: true }),
-      chip({ key: 'keys', icon: <Keyboard size={15} />, label: 'Shortcuts', onClick: () => { onOpenShortcuts(); close(); } }),
+      // NOTE: no "Shortcuts" chip — the searchable keyboard-shortcuts dialog
+      // is a desktop affordance (Ctrl+X combos, Esc-to-close). Touch builds
+      // have no keyboard, so it is not surfaced on the command bar.
     ],
   };
 

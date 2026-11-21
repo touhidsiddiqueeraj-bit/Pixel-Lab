@@ -27,7 +27,7 @@ import {
 import { rafThrottle, detectPerfTier, getPerfSettings, type PerfSettings } from '@/lib/perf';
 import { TOOL_SHORTCUTS } from '@/lib/shortcuts';
 import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
+import { cn, isTouchDevice } from '@/lib/utils';
 
 interface Point { x: number; y: number; }
 
@@ -1669,7 +1669,11 @@ export function EditorCanvas() {
       }
       // Otherwise paint
       if (!cloneSourceRef.current || !cloneSampleCanvasRef.current) {
-        toast.error('Alt+Click or tap "Set Source" to set clone source first');
+        // Alt+Click is a desktop affordance — on touch the only path is the
+        // "Set Source" button in the tool options drawer.
+        toast.error(isTouchDevice()
+          ? 'Tap "Set Source" in tool options, then tap the canvas'
+          : 'Alt+Click or tap "Set Source" to set clone source first');
         return;
       }
       drawingRef.current = true;
@@ -1704,7 +1708,9 @@ export function EditorCanvas() {
         return;
       }
       if (!healSourceRef.current || !healSampleCanvasRef.current) {
-        toast.error('Alt+Click or tap "Set Source" to set heal source first');
+        toast.error(isTouchDevice()
+          ? 'Tap "Set Source" in tool options, then tap the canvas'
+          : 'Alt+Click or tap "Set Source" to set heal source first');
         return;
       }
       drawingRef.current = true;

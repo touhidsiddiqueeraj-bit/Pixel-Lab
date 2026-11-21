@@ -174,6 +174,15 @@ export function PhotoEditor() {
     return () => window.removeEventListener('resize', check);
   }, []);
 
+  // On mobile the Adjust/Develop tabs don't exist in the panels sheet (they
+  // moved to the bottom adjust drawer) — remap a stale tab DURING RENDER
+  // (React's official adjust-state-during-render pattern; same approach as
+  // the dock's optionsOpen guard in MobileUI) so the sheet never opens with
+  // a hidden active tab.
+  if (isMobile && (activeTab === 'adjust' || activeTab === 'develop')) {
+    setActiveTab('layers');
+  }
+
   // Listen for vectorize event from menu
   useEffect(() => {
     const handler = () => setVectorizeOpen(true);
@@ -235,7 +244,12 @@ export function PhotoEditor() {
     };
   }, []);
 
-  const panels = (
+  // The panels Tabs — `withAdjustTabs` includes Adjust/Develop (desktop
+  // layout). On mobile those two moved OUT of the side sheet into the
+  // Snapseed-style bottom adjust drawer (they covered the photo in the
+  // sheet, and their sliders needed live preview anyway) — the mobile sheet
+  // keeps the panel-like tabs only.
+  const renderPanels = (withAdjustTabs: boolean) => (
     <Tabs
       value={activeTab}
       onValueChange={(v) => setActiveTab(v as PanelTab)}
@@ -248,12 +262,16 @@ export function PhotoEditor() {
         <TabsTrigger value="layers" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
           <Layers size={12} /> <span>Layers</span>
         </TabsTrigger>
-        <TabsTrigger value="adjust" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
-          <SlidersHorizontal size={12} /> <span>Adjust</span>
-        </TabsTrigger>
-        <TabsTrigger value="develop" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
-          <Sun size={12} /> <span>Develop</span>
-        </TabsTrigger>
+        {withAdjustTabs && (
+          <>
+            <TabsTrigger value="adjust" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
+              <SlidersHorizontal size={12} /> <span>Adjust</span>
+            </TabsTrigger>
+            <TabsTrigger value="develop" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
+              <Sun size={12} /> <span>Develop</span>
+            </TabsTrigger>
+          </>
+        )}
         <TabsTrigger value="color" className="rounded-none data-[state=active]:editor-surface-3 data-[state=active]:editor-accent gap-1 px-2 sm:px-3 text-xs shrink-0">
           <Palette size={12} /> <span>Color</span>
         </TabsTrigger>
@@ -273,12 +291,16 @@ export function PhotoEditor() {
       <TabsContent value="layers" className="flex-1 min-h-0 m-0">
         <LayersPanel />
       </TabsContent>
-      <TabsContent value="adjust" className="flex-1 min-h-0 m-0">
-        <AdjustmentsPanel />
-      </TabsContent>
-      <TabsContent value="develop" className="flex-1 min-h-0 m-0">
-        <DevelopPanel />
-      </TabsContent>
+      {withAdjustTabs && (
+        <>
+          <TabsContent value="adjust" className="flex-1 min-h-0 m-0">
+            <AdjustmentsPanel />
+          </TabsContent>
+          <TabsContent value="develop" className="flex-1 min-h-0 m-0">
+            <DevelopPanel />
+          </TabsContent>
+        </>
+      )}
       <TabsContent value="color" className="flex-1 min-h-0 m-0">
         <ColorPanel />
       </TabsContent>
@@ -532,7 +554,6 @@ export function PhotoEditor() {
                 onClose={() => setMenuBarOpen(false)}
                 onOpenNewDoc={() => { setNewDocOpen(true); setMenuBarOpen(false); }}
                 onOpenFigmaImport={() => { setFigmaImportOpen(true); setMenuBarOpen(false); }}
-                onOpenShortcuts={() => { setShortcutsOpen(true); setMenuBarOpen(false); }}
               />
             )}
             {isMobile && (
@@ -545,16 +566,18 @@ export function PhotoEditor() {
               />
             )}
 
-            {/* Desktop: right panels */}
+            {/* Desktop: right panels (Adjust/Develop included) */}
             {!isMobile && panelOpen && (
               <div className="w-[320px] lg:w-[360px] border-l editor-border shrink-0 flex flex-col">
-                {panels}
+                {renderPanels(true)}
               </div>
             )}
 
             {/* Mobile: panels in a side sheet — opened from the floating edge
                 buttons or the drawer. Width covers most of the screen so panel
-                controls get real estate without going full-screen. */}
+                controls get real estate without going full-screen. Adjust /
+                Develop are NOT here: they live in the Snapseed-style bottom
+                adjust drawer (the sheet used to cover the photo with them). */}
             {isMobile && (
               <Sheet open={panelOpen} onOpenChange={setPanelOpen}>
                 <SheetContent side="right" className="editor-surface editor-text border-l editor-border w-[86vw] max-w-[340px] p-0">
@@ -562,7 +585,7 @@ export function PhotoEditor() {
                     <SheetTitle className="editor-text">Panels</SheetTitle>
                   </SheetHeader>
                   <div className="flex-1 min-h-0">
-                    {panels}
+                    {renderPanels(false)}
                   </div>
                 </SheetContent>
               </Sheet>

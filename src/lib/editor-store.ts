@@ -18,6 +18,7 @@ import {
 import { featherSelection as featherMask } from './image-processing';
 import { getPerfSettings, type PerfSettings } from './perf';
 import { toast } from 'sonner';
+import { generateId, isTouchDevice } from '@/lib/utils';
 
 const DEFAULT_TOOL_OPTIONS: ToolOptions = {
   brushSize: 20,
@@ -48,8 +49,6 @@ const DEFAULT_TOOL_OPTIONS: ToolOptions = {
 
 const MAX_HISTORY = 40;
 const DEFAULT_PERF_SETTINGS = getPerfSettings();
-
-import { generateId } from '@/lib/utils';
 
 interface EditorState {
   // Document
@@ -112,6 +111,10 @@ interface EditorState {
   reorderLayers: (fromIndex: number, toIndex: number) => void;
   refreshThumbnail: (id: string) => void;
   replaceLayerCanvas: (id: string, canvas: HTMLCanvasElement) => void;
+  // Swap a layer's canvas WITHOUT regenerating the thumbnail or touching
+  // history — for live-preview loops that run on every slider tick. Commit
+  // paths must still use replaceLayerCanvas (thumbnail + history via caller).
+  setLayerCanvasSilent: (id: string, canvas: HTMLCanvasElement) => void;
   addLayerMask: (id: string) => void;
   removeLayerMask: (id: string) => void;
   toggleLayerMask: (id: string) => void;
@@ -594,6 +597,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     layers: s.layers.map((l) => l.id === id ? { ...l, canvas, thumbnail: generateThumbnail(canvas) } : l),
   })),
 
+  setLayerCanvasSilent: (id, canvas) => set((s) => ({
+    layers: s.layers.map((l) => l.id === id ? { ...l, canvas } : l),
+  })),
+
   addLayerMask: (id) => set((s) => {
     const layer = s.layers.find((l) => l.id === id);
     if (!layer || layer.maskCanvas) return s;
@@ -632,7 +639,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const prev = get().selectionBounds;
     set({ selectionMask: mask, selectionBounds: bounds });
     if (!prev && bounds) {
-      toast('Selection active — press Esc or click × in toolbar to clear');
+      // The Esc/toolbar hint is desktop-only: on touch there is no keyboard
+      // and no left toolbar — the ✕ edge button is the deselect affordance.
+      toast(isTouchDevice()
+        ? 'Selection active — tap the ✕ button on the right edge to deselect'
+        : 'Selection active — press Esc or click × in toolbar to clear');
     }
   },
   clearSelection: () => set({ selectionMask: null, selectionBounds: null }),

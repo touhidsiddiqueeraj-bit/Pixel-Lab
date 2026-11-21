@@ -28,7 +28,7 @@ import {
   Gauge,
   GraduationCap,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, isTouchDevice } from '@/lib/utils';
 
 interface OnboardingStep {
   title: string;
@@ -37,7 +37,8 @@ interface OnboardingStep {
   tips?: string[];
 }
 
-const STEPS: OnboardingStep[] = [
+// Desktop tour — toolbar + keyboard-centric tips.
+const DESKTOP_STEPS: OnboardingStep[] = [
   {
     title: 'Welcome to Pixel Lab!',
     description: 'A professional, browser-based image editor with layers, masks, filters, vectorization, and more. Let\'s take a quick tour.',
@@ -129,6 +130,76 @@ const STEPS: OnboardingStep[] = [
 ];
 
 const ONBOARDING_KEY = 'pixel-lab-onboarding-completed';
+
+// Touch variant — the desktop tour leans on keyboard shortcuts (B = Brush,
+// Ctrl+A, Alt+Click, Space+drag) and the left toolbar, none of which exist
+// on phones / in the APK. Same story beats, touch-first wording.
+const MOBILE_STEPS: OnboardingStep[] = [
+  {
+    title: 'Welcome to Pixel Lab!',
+    description: 'A professional, browser-based image editor with layers, masks, filters, vectorization, and more. Let\'s take a quick tour.',
+    icon: <Sparkles size={48} className="text-sky-400" />,
+    tips: [
+      'The photo fills nearly the whole screen — controls float on top',
+      'Auto-detects light/dark mode from your system',
+      'Open images from the ☰ menu — File ▸ Open Image…',
+    ],
+  },
+  {
+    title: 'Tools at Your Thumb',
+    description: 'The floating dock at the bottom holds the 5 most-used tools. Everything else lives behind the ••• button.',
+    icon: <Brush size={48} className="text-sky-400" />,
+    tips: [
+      'Tap the ACTIVE tool again to open its options drawer',
+      '••• opens every remaining tool, grouped and searchable',
+      'Use two fingers to zoom and pan the canvas',
+    ],
+  },
+  {
+    title: 'Layers & Non-Destructive Editing',
+    description: 'Work non-destructively with layers. Each layer is independent — you can reorder, hide, lock, or mask them without affecting others.',
+    icon: <Layers size={48} className="text-sky-400" />,
+    tips: [
+      'The Layers edge button (right side) opens the layers panel',
+      'Use Layer Masks to hide parts without erasing',
+      '16 blend modes for creative compositing',
+      'Layer ▸ menu chips: add, duplicate, merge, flatten',
+    ],
+  },
+  {
+    title: 'Adjust Like Snapseed',
+    description: 'The ☀ Adjust button opens a bottom drawer — the photo stays visible while sliders update it in real time.',
+    icon: <Sun size={48} className="text-sky-400" />,
+    tips: [
+      'Sliders preview live — Apply commits, ✕ reverts',
+      'Hold the eye button to compare with the original',
+      'Select ▸ Deselect (☰ menu) or the ✕ edge button ends a selection',
+      'AI group: Auto Unblur and Remove Background',
+    ],
+  },
+  {
+    title: 'Save Your Work',
+    description: 'Export your edits to PNG, JPEG, or WebP — on Android they land in Documents/PixelLab.',
+    icon: <Download size={48} className="text-sky-400" />,
+    tips: [
+      'File ▸ Save PNG / JPG / WebP from the ☰ menu',
+      'The ↑ button in the title bar is a quick PNG export',
+      'Undo / Redo sit next to the document name',
+    ],
+  },
+  {
+    title: 'Performance & Themes',
+    description: 'Pixel Lab adapts to your device for the best experience.',
+    icon: <Gauge size={48} className="text-sky-400" />,
+    tips: [
+      'Auto-detects device performance tier (Low/Medium/High)',
+      'Theme cycles in View ▸ Theme (Light / Dark / System)',
+      'Luna, the AI assistant, is the ✨ edge button',
+    ],
+  },
+];
+
+const STEPS = isTouchDevice() ? MOBILE_STEPS : DESKTOP_STEPS;
 
 export function Onboarding() {
   const [open, setOpen] = useState(false);

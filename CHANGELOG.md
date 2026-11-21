@@ -11,6 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet — push a `v*` tag to trigger the Release APK workflow, then move the changes here under a new version heading.
 
+## [1.0.5] — 2026-11-21
+
+### 📱 Mobile Editing (APK)
+
+#### Adjustments no longer cover the photo — Snapseed-style bottom drawer
+- **The problem**: the ☀ Adjust edge button opened the full desktop `AdjustmentsPanel` inside the side sheet (`w-[86vw]`), which covered almost the entire photo with sliders — the exact opposite of the v1.0.2 redesign's goal (canvas first). On top of that, its sliders only *staged* values; the photo never changed until an Apply button was pressed.
+- **New `MobileAdjustDrawer`** (bottom-anchored above the tool dock, translucent glass, `max-h-[62dvh]`): the photo stays visible in the upper half of the screen the whole time. Group chips swap in place — **Light** (Brightness, Contrast, Highlights, Shadows, Whites, Blacks), **Color** (Hue, Saturation, Lightness, Vibrance, Warmth), **Detail** (Clarity, Sharpen, Blur, Denoise), **Effects** (Vignette+size, Grain, Pixelate, Posterize), **Pro** (Levels, Curves, Channel Mixer, HDR), **AI** (Auto Unblur, Remove Background), **Filters** (one-tap Grayscale/Invert/Sepia/Edge Detect/Emboss/Denoise).
+- **LIVE PREVIEW**: sliders re-render the photo in real time while dragging (throttled to ~80 ms so heavy ops like Clarity stay smooth on phones). The original is snapshotted at open; the preview chain runs snapshot → adjustment group → silent canvas swap. **Apply** commits (thumbnail + history + toast), **Reset** zeroes the group, ✕ reverts untouched. This closes the original "sliders only update after clicking off" complaint.
+- **Compare (hold)**: press-and-hold the eye button flashes the untouched original — Snapseed's signature original-vs-edit affordance.
+- The mobile panels sheet now shows only panel-like tabs (Layers / Color / Nav / History / Luna / Recipes) — Adjust and Develop moved into the drawer (desktop layout unchanged, including its side panels).
+
+#### Deselect on touch (no more stuck selections)
+- **The problem**: touch has no Esc key and no desktop toolbar — once a marquee/lasso/wand selection was active there was NO way out.
+- A contextual **✕ Deselect edge button** now appears in the floating right-edge stack whenever a selection is active (and the "Selection active" toast now tells touch users about it instead of suggesting Esc).
+- The ☰ command bar gained a **Select category** — Select All / Deselect / Invert Selection — mirroring the desktop Edit menu.
+
+#### Desktop-only hints removed from the APK
+- **The problem**: Alt+Click phrasing and keyboard-shortcut content leaked into touch builds.
+- New `isTouchDevice()` helper (`src/lib/utils.ts`, cached `pointer: coarse` matchMedia) gates every leak: the clone/heal "Set Source" button label and the missing-source error toasts now speak touch ("Tap 'Set Source' in tool options…"), the View category's "Shortcuts" chip (a Ctrl+X searchable dialog) is gone from the mobile command bar, and the first-run tour swaps to a touch-written variant (floating dock, two-finger pan/zoom, drawer workflow) instead of "B = Brush, Ctrl+Shift+N, [ or ]".
+
 ## [1.0.4] — 2026-11-21
 
 ### 📗 Docs
